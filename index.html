@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Traceboard — shareable multi-agent orchestration trace player. Drop a JSONL trace, replay your agent run." />
+  <title>Traceboard · Agent Trace Player</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>🌊</text></svg>" />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header id="app-header">
+    <div class="header-left">
+      <span class="logo">🌊</span>
+      <span class="brand">Traceboard</span>
+      <span class="tagline" data-i18n="tagline">Agent Trace Player</span>
+    </div>
+    <div class="header-right">
+      <button id="btn-lang" class="btn-ghost" title="Toggle language">EN / 中</button>
+      <button id="btn-share" class="btn-ghost" title="Share trace URL" data-i18n="share">Share</button>
+      <button id="btn-export" class="btn-ghost" title="Export snapshot" data-i18n="export">Export</button>
+      <a href="https://github.com/Zijian-Ni/traceboard" target="_blank" class="btn-ghost" title="GitHub">★ GitHub</a>
+    </div>
+  </header>
+
+  <!-- Hero drop zone (shown when no trace loaded) -->
+  <section id="hero" class="visible">
+    <div class="hero-inner">
+      <h1 class="aurora-title">
+        <span data-i18n="hero_title1">See what your agents</span><br>
+        <span class="glow" data-i18n="hero_title2">actually did.</span>
+      </h1>
+      <p class="hero-sub" data-i18n="hero_sub">Drop a JSONL trace file, or load the live demo below.</p>
+
+      <div id="drop-zone" role="button" tabindex="0" aria-label="Drop JSONL trace file here">
+        <div class="drop-icon">📂</div>
+        <p class="drop-label" data-i18n="drop_label">Drop trace.jsonl here</p>
+        <p class="drop-hint" data-i18n="drop_hint">or click to browse</p>
+        <input type="file" id="file-input" accept=".jsonl,.json,.ndjson" hidden />
+      </div>
+
+      <div class="hero-actions">
+        <button id="btn-demo" class="btn-primary">
+          <span>⚡</span> <span data-i18n="load_demo">Load Live Demo</span>
+        </button>
+        <span class="hero-hint" data-i18n="demo_hint">Real trace from a 3-agent aurora orchestra run</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main trace viewer (hidden until trace loaded) -->
+  <main id="trace-viewer" class="hidden">
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <div class="toolbar-left">
+        <span class="trace-name" id="trace-filename">trace.jsonl</span>
+        <span class="trace-stats" id="trace-stats"></span>
+      </div>
+      <div class="toolbar-filters">
+        <label class="filter-label" data-i18n="filter_by">Filter:</label>
+        <div id="type-filters" class="filter-chips"></div>
+      </div>
+      <div class="toolbar-right">
+        <button id="btn-reset-view" class="btn-sm btn-ghost" data-i18n="reset">Reset</button>
+        <button id="btn-back" class="btn-sm btn-ghost" data-i18n="back_to_hero">← Load another</button>
+      </div>
+    </div>
+
+    <!-- Summary bar -->
+    <div id="summary-bar" class="hidden">
+      <div id="summary-content"></div>
+      <button id="btn-close-summary" class="btn-ghost btn-sm">✕</button>
+    </div>
+
+    <!-- Swimlane container -->
+    <div id="swimlane-container">
+      <div id="time-ruler"></div>
+      <div id="lanes"></div>
+    </div>
+
+    <!-- Legend -->
+    <div id="legend"></div>
+  </main>
+
+  <!-- Detail drawer -->
+  <aside id="detail-drawer" class="hidden" role="dialog" aria-modal="true" aria-label="Event detail">
+    <div class="drawer-header">
+      <span id="drawer-event-type" class="event-badge"></span>
+      <button id="btn-close-drawer" class="btn-ghost btn-sm" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="drawer-field">
+        <span class="field-label" data-i18n="field_agent">Agent</span>
+        <span id="drawer-agent" class="field-value"></span>
+      </div>
+      <div class="drawer-field">
+        <span class="field-label" data-i18n="field_phase">Phase</span>
+        <span id="drawer-phase" class="field-value"></span>
+      </div>
+      <div class="drawer-field">
+        <span class="field-label" data-i18n="field_time">Time</span>
+        <span id="drawer-time" class="field-value"></span>
+      </div>
+      <div class="drawer-field" id="drawer-duration-row">
+        <span class="field-label" data-i18n="field_duration">Duration</span>
+        <span id="drawer-duration" class="field-value"></span>
+      </div>
+      <div class="drawer-section">
+        <span class="field-label" data-i18n="field_message">Message</span>
+        <pre id="drawer-message" class="drawer-pre"></pre>
+      </div>
+      <div class="drawer-section" id="drawer-raw-row">
+        <span class="field-label" data-i18n="field_raw">Raw JSON</span>
+        <pre id="drawer-raw" class="drawer-pre drawer-raw"></pre>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Backdrop -->
+  <div id="drawer-backdrop" class="hidden"></div>
+
+  <!-- Toast -->
+  <div id="toast" class="hidden" role="alert" aria-live="polite"></div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
