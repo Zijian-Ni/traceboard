@@ -1,14 +1,22 @@
 /**
- * Traceboard v0.3 — cinematic multi-agent trace player
+ * Traceboard v0.4 — cinematic multi-agent trace player
+ * Integrates trace-kit, lz-string sharing, redaction, Web Worker streaming,
+ * IndexedDB library, aurora-ui design system, command palette, PWA.
  */
 import { setLang, t, currentLang } from './i18n.js'
 import { getAgentColor, getTypeColor, getAllTypeKeys, getAllAgentKeys } from './colors.js'
 import {
-  parseJSONL, normalizeEvents, computeStats,
-  groupByAgent, formatDuration, formatTimestamp,
-  encodeTraceURL, decodeTraceURL
+  parseTrace, computeStats, redactTrace, hasSecrets,
+  formatDuration, formatTimestamp, groupByAgent,
+  encodeShareURL, decodeShareURL, decodeLegacyURL,
+  MAX_SHARE_URL,
 } from './trace.js'
+import { CommandPalette, initAuroraUI, toast as auroraToast } from './vendor/aurora-ui/aurora-ui.js'
+import {
+  saveTrace, listTraces, loadTrace, pinTrace, deleteTrace, clearLibrary, libraryStats,
+} from './library.js'
 
+// ─── global state ─────────────────────────────────────────────────────────
 let state = {
   events: [],
   filtered: [],
@@ -18,41 +26,38 @@ let state = {
   filename: 'trace.jsonl',
   summaryMarkdown: null,
   playback: { playing: false, idx: 0, timer: null, speed: 1 },
+  traceFormat: null,
+  traceWarnings: [],
+  traceText: '',
+  redactEnabled: true,
 }
 
+let palette = null
+
+// ─── DOM shortcuts ────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id)
-const $hero = $('hero')
-const $viewer = $('trace-viewer')
-const $dropZone = $('drop-zone')
-const $fileInput = $('file-input')
-const $btnDemo = $('btn-demo')
-const $btnLang = $('btn-lang')
-const $btnShare = $('btn-share')
-const $btnExport = $('btn-export')
-const $btnBack = $('btn-back')
-const $btnReset = $('btn-reset-view')
-const $typeFilters = $('type-filters')
-const $lanes = $('lanes')
-const $legend = $('legend')
-const $ruler = $('time-ruler')
-const $filename = $('trace-filename')
-const $stats = $('trace-stats')
-const $toast = $('toast')
-const $drawer = $('detail-drawer')
-const $backdrop = $('drawer-backdrop')
-const $summaryBar = $('summary-bar')
-const $summaryContent = $('summary-content')
 
 async function init() {
   setLang('en')
+
+  // Aurora-UI theme
+  initAuroraUI({ themeToggle: '[data-aurora-theme-toggle]' })
+
   setupDrop()
   setupButtons()
   ensureChrome()
+  setupCommandPalette()
   checkURLHash()
+
+  // Library: show landing bento if IndexedDB has traces
+  try {
+    const traces = await listTraces()
+    if (traces.length) renderLibraryBento(traces)
+  } catch { /* idb unavailable in some sandboxed frames */ }
 }
 
+// ─── Chrome (particles + theme dock) ──────────────────────────────────────
 function ensureChrome() {
-  // particle canvas
   if (!$('tb-fx')) {
     const c = document.createElement('canvas')
     c.id = 'tb-fx'
@@ -60,12 +65,11 @@ function ensureChrome() {
     document.body.prepend(c)
     bootParticles(c)
   }
-  // theme dock
   if (!$('tb-theme-dock')) {
     const dock = document.createElement('div')
     dock.id = 'tb-theme-dock'
     dock.innerHTML = `
-      <button id="tb-theme-toggle" class="tb-theme-toggle">🎨</button>
+      <button id="tb-theme-toggle" class="tb-theme-toggle" data-aurora-theme-toggle title="Toggle theme">🎨</button>
       <div id="tb-theme-panel" class="tb-theme-panel" hidden>
         <div class="tb-theme-title">Atmosphere</div>
         <div class="tb-theme-presets">
@@ -100,7 +104,7 @@ function ensureChrome() {
     dock.querySelector('#tb-bg-upload').onchange = (e) => {
       const f = e.target.files?.[0]; if (!f) return
       const r = new FileReader()
-      r.onload = () => { try { localStorage.setItem('tb_bg_custom', r.result) } catch {} ; applyCustom(r.result) }
+      r.onload = () => { try { localStorage.setItem('tb_bg_custom', r.result) } catch {}; applyCustom(r.result) }
       r.readAsDataURL(f)
     }
     dock.querySelector('#tb-bg-opacity').oninput = (e) => {
@@ -144,7 +148,10 @@ function bootParticles(c) {
   loop()
 }
 
+// ─── Drop / file loading ───────────────────────────────────────────────────
 function setupDrop() {
+  const $dropZone = $('drop-zone')
+  const $fileInput = $('file-input')
   $dropZone.addEventListener('click', () => $fileInput.click())
   $dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') $fileInput.click() })
   $dropZone.addEventListener('dragover', e => { e.preventDefault(); $dropZone.classList.add('drag-over') })
@@ -162,8 +169,91 @@ function setupDrop() {
   })
 }
 
+// TB-A1: Use Web Worker for large files (>500KB), direct parse for small files
 async function loadFile(file) {
-  loadTraceText(await file.text(), file.name)
+  if (file.size > 500 * 1024) {
+    await loadFileWorker(file)
+  } else {
+    const text = await file.text()
+    loadTraceText(text, file.name)
+  }
+}
+
+function loadFileWorker(file) {
+  return new Promise((resolve) => {
+    const worker = new Worker(new URL('./parse.worker.js', import.meta.url), { type: 'module' })
+    let accumulated = []
+    let firstPaint = false
+    const startTime = Date.now()
+
+    // Show progress bar
+    showProgressBar()
+
+    worker.onmessage = (e) => {
+      const { kind, lines, total } = e.data
+      if (kind === 'batch') {
+        accumulated = accumulated.concat(lines)
+        updateProgressBar(total, file.size)
+        if (!firstPaint && accumulated.length >= 500) {
+          firstPaint = true
+          const trace = parseTrace(accumulated.map(l => JSON.stringify(l)).join('\n'), { source: file.name })
+          state.traceText = accumulated.map(l => JSON.stringify(l)).join('\n')
+          applyTrace(trace, file.name, null)
+          const elapsed = Date.now() - startTime
+          console.log(`[TB-A1] First paint: ${elapsed}ms, ${accumulated.length} events`)
+        }
+      } else if (kind === 'done') {
+        hideProgressBar()
+        const text = accumulated.map(l => JSON.stringify(l)).join('\n')
+        state.traceText = text
+        const trace = parseTrace(text, { source: file.name })
+        applyTrace(trace, file.name, null)
+        const elapsed = Date.now() - startTime
+        console.log(`[TB-A1] Full parse done: ${elapsed}ms, ${total} events, file: ${(file.size/1e6).toFixed(1)}MB`)
+        showToast(t('toast_loaded') + ` (${total} ${t('events')})`)
+        worker.terminate()
+        // auto-save to library
+        autoSaveToLibrary(file.name, trace, text)
+        resolve()
+      } else if (kind === 'error') {
+        hideProgressBar()
+        showToast('❌ ' + e.data.message, 'error')
+        worker.terminate()
+        resolve()
+      }
+    }
+    worker.postMessage({ file })
+  })
+}
+
+function showProgressBar() {
+  let bar = $('parse-progress')
+  if (!bar) {
+    bar = document.createElement('div')
+    bar.id = 'parse-progress'
+    bar.className = 'parse-progress'
+    bar.innerHTML = `<div class="parse-progress-inner" id="parse-progress-inner"></div>
+      <span class="parse-progress-label" id="parse-progress-label">${t('progress_parsing', { n: 0 })}</span>`
+    document.body.appendChild(bar)
+  }
+  bar.classList.remove('hidden')
+}
+
+function updateProgressBar(eventCount, fileSize) {
+  const label = $('parse-progress-label')
+  if (label) label.textContent = t('progress_parsing', { n: eventCount })
+  // estimate progress from events
+  const inner = $('parse-progress-inner')
+  if (inner) inner.style.width = Math.min(90, (eventCount / (fileSize / 80)) * 100) + '%'
+}
+
+function hideProgressBar() {
+  const bar = $('parse-progress')
+  if (bar) {
+    const inner = $('parse-progress-inner')
+    if (inner) inner.style.width = '100%'
+    setTimeout(() => bar.classList.add('hidden'), 400)
+  }
 }
 
 async function loadDemo() {
@@ -182,9 +272,19 @@ async function loadDemo() {
 }
 
 function loadTraceText(text, filename, summary = null) {
-  const raw = parseJSONL(text)
-  if (!raw.length) return showToast('⚠️ No valid events found', 'warn')
-  const events = normalizeEvents(raw)
+  state.traceText = text
+  const trace = parseTrace(text, { source: filename })
+  applyTrace(trace, filename, summary)
+  showToast(t('toast_loaded') + ` (${trace.events.length} ${t('events')})`)
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches && trace.events.length <= 40) {
+    setTimeout(() => { if (!state.playback.playing) startPlayback() }, 500)
+  }
+  // auto-save to library
+  autoSaveToLibrary(filename, trace, text)
+}
+
+function applyTrace(trace, filename, summary) {
+  const events = trace.events
   state.events = events
   state.filtered = events
   state.stats = computeStats(events)
@@ -192,32 +292,144 @@ function loadTraceText(text, filename, summary = null) {
   state.activeTypes = new Set()
   state.selectedEvent = null
   state.summaryMarkdown = summary
+  state.traceFormat = trace.format
+  state.traceWarnings = trace.warnings || []
   stopPlayback()
   state.playback = { playing: false, idx: 0, timer: null, speed: state.playback?.speed || 1 }
   showViewer()
   renderAll()
-  showToast(t('toast_loaded') + ` (${events.length} ${t('events')})`)
-  // gentle autoplay for short demos only
-  if (!matchMedia('(prefers-reduced-motion: reduce)').matches && state.events.length <= 40) {
-    setTimeout(() => { if (!state.playback.playing) startPlayback() }, 500)
-  }
 }
 
+async function autoSaveToLibrary(name, trace, text) {
+  try {
+    const meta = {
+      format: trace.format,
+      count: trace.events.length,
+      agents: trace.meta?.agentCount ?? [...new Set(trace.events.map(e => e.agent))].length,
+      durationMs: computeStats(trace.events).durationMs,
+      errors: trace.events.filter(e => e.type === 'error').length,
+    }
+    await saveTrace({ name, meta, events: trace.events, text })
+  } catch { /* non-critical */ }
+}
+
+// ─── Hero / Viewer visibility ──────────────────────────────────────────────
 function showViewer() {
-  $hero.classList.remove('visible'); $hero.classList.add('hidden')
-  $viewer.classList.remove('hidden')
+  $('hero').classList.remove('visible'); $('hero').classList.add('hidden')
+  $('trace-viewer').classList.remove('hidden')
   document.body.classList.add('viewer-on')
 }
 function showHero() {
   stopPlayback()
-  $viewer.classList.add('hidden')
-  $hero.classList.remove('hidden'); $hero.classList.add('visible')
+  $('trace-viewer').classList.add('hidden')
+  $('hero').classList.remove('hidden'); $('hero').classList.add('visible')
   document.body.classList.remove('viewer-on')
   closeDrawer()
+  // Refresh library bento
+  listTraces().then(traces => renderLibraryBento(traces)).catch(() => {})
 }
 
+// ─── Library bento rendering ───────────────────────────────────────────────
+function renderLibraryBento(traces) {
+  let container = $('library-bento')
+  if (!container) {
+    container = document.createElement('section')
+    container.id = 'library-bento'
+    container.className = 'library-bento'
+    $('hero')?.querySelector('.hero-inner')?.appendChild(container)
+  }
+
+  if (!traces.length) {
+    container.innerHTML = `<h2 class="library-title">${t('library_title')}</h2>
+      <p class="library-empty">${t('library_empty')}</p>`
+    return
+  }
+
+  const fmt = (bytes) => bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)}MB` : `${(bytes / 1024).toFixed(0)}KB`
+  const formatLabel = { aurora: 'Aurora', 'claude-code': 'Claude Code', 'otel-genai': 'OTel', unknown: '?' }
+
+  container.innerHTML = `
+    <div class="library-header">
+      <h2 class="library-title">${t('library_title')}</h2>
+      <div class="library-actions">
+        <button class="btn-ghost btn-sm" id="btn-library-clear">${t('library_clear')}</button>
+      </div>
+    </div>
+    <p class="library-privacy">🔒 ${t('library_privacy')}</p>
+    <div class="bento">
+      ${traces.map(tr => `
+        <div class="plug-card" data-trace-id="${tr.id}" tabindex="0" role="button"
+             aria-label="Load trace ${tr.name}">
+          <div class="plug-card-header">
+            <span class="chip chip--format">${formatLabel[tr.meta?.format] || '?'}</span>
+            ${tr.pinned ? '<span class="chip chip--pin">📌</span>' : ''}
+          </div>
+          <div class="plug-card-name">${escapeHtml(tr.name.split('/').pop())}</div>
+          <div class="plug-card-readouts">
+            <span class="readout">${tr.meta?.count ?? '?'} <small>events</small></span>
+            <span class="readout">${tr.meta?.agents ?? '?'} <small>agents</small></span>
+            ${tr.meta?.durationMs ? `<span class="readout">${formatDuration(tr.meta.durationMs)}</span>` : ''}
+            ${tr.meta?.errors ? `<span class="readout readout--error">${tr.meta.errors} <small>errors</small></span>` : ''}
+          </div>
+          <div class="plug-card-meta">${fmt(tr.byteSize)} · ${new Date(tr.addedAt).toLocaleDateString()}</div>
+          <div class="plug-card-actions">
+            <button class="btn-ghost btn-xs btn-pin" data-id="${tr.id}" data-pinned="${tr.pinned}">
+              ${tr.pinned ? t('library_unpin') : t('library_pin')}
+            </button>
+            <button class="btn-ghost btn-xs btn-delete" data-id="${tr.id}">🗑</button>
+          </div>
+        </div>`).join('')}
+    </div>`
+
+  // wire events
+  container.querySelectorAll('.plug-card').forEach(card => {
+    card.addEventListener('click', async (e) => {
+      if (e.target.closest('.btn-pin') || e.target.closest('.btn-delete')) return
+      const id = card.dataset.traceId
+      try {
+        const entry = await loadTrace(id)
+        if (entry) loadTraceText(entry.text, entry.name)
+      } catch (err) { showToast('❌ ' + err.message, 'error') }
+    })
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') card.click() })
+  })
+  container.querySelectorAll('.btn-pin').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation()
+      const pinned = btn.dataset.pinned !== 'true'
+      await pinTrace(btn.dataset.id, pinned)
+      const traces = await listTraces()
+      renderLibraryBento(traces)
+    }
+  })
+  container.querySelectorAll('.btn-delete').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation()
+      await deleteTrace(btn.dataset.id)
+      const traces = await listTraces()
+      renderLibraryBento(traces)
+    }
+  })
+  $('btn-library-clear')?.addEventListener('click', async () => {
+    if (confirm('Clear all saved traces?')) {
+      await clearLibrary()
+      renderLibraryBento([])
+    }
+  })
+
+  // Apply tilt via aurora-ui (already statically imported)
+  attachTilt(container)
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+}
+
+// ─── Render all ────────────────────────────────────────────────────────────
 function renderAll() {
   updateToolbar()
+  renderFormatBadge()
+  renderWarningsBar()
   renderTypeFilters()
   renderSummary()
   ensurePlaybackBar()
@@ -228,11 +440,57 @@ function renderAll() {
 
 function updateToolbar() {
   const { count, agents, durationMs } = state.stats
-  $filename.textContent = state.filename.split('/').pop()
-  $stats.textContent = `${count} ${t('events')} · ${agents.length} ${t('agents')} · ${formatDuration(durationMs)}`
+  $('trace-filename').textContent = state.filename.split('/').pop()
+  $('trace-stats').textContent = `${count} ${t('events')} · ${agents.length} ${t('agents')} · ${formatDuration(durationMs)}`
+}
+
+// TB-1: Format chip in header
+function renderFormatBadge() {
+  let badge = $('format-badge')
+  if (!badge) {
+    badge = document.createElement('span')
+    badge.id = 'format-badge'
+    badge.className = 'chip format-badge'
+    $('trace-stats')?.insertAdjacentElement('afterend', badge)
+  }
+  const labels = {
+    aurora: t('format_aurora'),
+    'claude-code': t('format_claude_code'),
+    'otel-genai': t('format_otel'),
+    unknown: t('format_unknown'),
+  }
+  const label = labels[state.traceFormat] || state.traceFormat || '?'
+  badge.textContent = label
+  badge.className = `chip format-badge format-badge--${state.traceFormat || 'unknown'}`
+}
+
+// TB-1: Warnings bar
+function renderWarningsBar() {
+  let bar = $('warnings-bar')
+  if (!bar) {
+    bar = document.createElement('div')
+    bar.id = 'warnings-bar'
+    bar.className = 'notice notice--warn'
+    $('toolbar')?.insertAdjacentElement('afterend', bar)
+  }
+
+  if (state.traceFormat === 'unknown') {
+    bar.innerHTML = `<strong>${t('warnings_bar')}:</strong> ${t('unknown_format_msg')}
+      <a href="https://github.com/Zijian-Ni/traceboard#supported-formats" target="_blank" rel="noopener">docs</a>`
+    bar.classList.remove('hidden')
+    return
+  }
+
+  if (!state.traceWarnings.length) {
+    bar.classList.add('hidden')
+    return
+  }
+  bar.innerHTML = `<strong>${t('warnings_bar')}:</strong> ${state.traceWarnings.map(escapeHtml).join(' · ')}`
+  bar.classList.remove('hidden')
 }
 
 function renderTypeFilters() {
+  const $typeFilters = $('type-filters')
   const types = getAllTypeKeys(state.events)
   $typeFilters.innerHTML = ''
   for (const type of types) {
@@ -258,7 +516,6 @@ function applyFilters() {
   state.filtered = state.activeTypes.size === 0
     ? state.events
     : state.events.filter(e => !state.activeTypes.has(e.type))
-  // keep playback index in range
   state.playback.idx = Math.min(state.playback.idx, Math.max(0, state.filtered.length - 1))
   renderTypeFilters()
   ensurePlaybackBar()
@@ -267,6 +524,8 @@ function applyFilters() {
 }
 
 function renderSummary() {
+  const $summaryBar = $('summary-bar')
+  const $summaryContent = $('summary-content')
   if (!state.summaryMarkdown) { $summaryBar.classList.add('hidden'); return }
   const html = state.summaryMarkdown
     .replace(/^#+\s+(.+)$/gm, '<strong>$1</strong>')
@@ -278,6 +537,7 @@ function renderSummary() {
   $('btn-close-summary').onclick = () => $summaryBar.classList.add('hidden')
 }
 
+// ─── Playback ──────────────────────────────────────────────────────────────
 function ensurePlaybackBar() {
   let bar = $('playback-bar')
   if (!bar) {
@@ -366,11 +626,10 @@ function stepPlayback(delta) {
 
 function applyPlaybackHighlight(open = false) {
   const ev = state.filtered[state.playback.idx]
-  // playhead
   const head = $('playhead')
   if (head && ev && state.stats?.durationMs && ev.ts) {
     const ratio = (new Date(ev.ts).getTime() - state.stats.startMs) / state.stats.durationMs
-    head.style.left = `calc(130px + ${Math.max(0, Math.min(1, ratio)) * 100}% * 1)` // fallback below
+    head.style.left = `calc(130px + ${Math.max(0, Math.min(1, ratio)) * 100}% * 1)`
   }
   document.querySelectorAll('.event-block').forEach(b => {
     const idx = Number(b.dataset.idx)
@@ -378,7 +637,6 @@ function applyPlaybackHighlight(open = false) {
     b.classList.toggle('is-past', !!(ev && idx <= ev._idx))
     b.classList.toggle('is-future', !!(ev && idx > ev._idx))
   })
-  // move playhead precisely using current block
   if (ev) {
     const block = document.querySelector(`.event-block[data-idx="${ev._idx}"]`)
     const laneTrack = block?.parentElement
@@ -390,7 +648,9 @@ function applyPlaybackHighlight(open = false) {
     }
     if (open) {
       document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
-      block?.classList.add('selected')
+      // .aurora-ring marks the selected event (the ONE ring rule)
+      document.querySelectorAll('.aurora-ring').forEach(b => b.classList.remove('aurora-ring'))
+      block?.classList.add('selected', 'aurora-ring')
       openDrawer(ev)
       block?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
     }
@@ -398,7 +658,10 @@ function applyPlaybackHighlight(open = false) {
   updateScrubFill()
 }
 
+// ─── Swimlane rendering ────────────────────────────────────────────────────
 function renderLanes() {
+  const $lanes = $('lanes')
+  const $ruler = $('time-ruler')
   $lanes.innerHTML = ''
   $ruler.innerHTML = ''
   const events = state.filtered
@@ -411,7 +674,6 @@ function renderLanes() {
   const containerW = $lanes.parentElement.clientWidth - 130 - 40
   const trackW = Math.max(containerW, 560)
 
-  // global playhead layer
   let stage = $('lane-stage')
   if (!stage) {
     stage = document.createElement('div')
@@ -419,7 +681,6 @@ function renderLanes() {
     $lanes.parentElement.insertBefore(stage, $lanes)
   }
   stage.innerHTML = `<div id="playhead" class="playhead"><i></i></div>`
-  // move lanes into stage if needed
   if ($lanes.parentElement !== stage) stage.appendChild($lanes)
 
   renderRuler(state.stats, trackW)
@@ -431,6 +692,7 @@ function renderLanes() {
 }
 
 function renderRuler(stats, trackW) {
+  const $ruler = $('time-ruler')
   const origin = document.createElement('div')
   origin.className = 'ruler-origin'
   $ruler.appendChild(origin)
@@ -465,7 +727,6 @@ function createLane(agent, events, trackW) {
   track.className = 'lane-track'
   track.style.width = trackW + 'px'
 
-  // connector path
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.classList.add('lane-links')
   svg.setAttribute('width', String(trackW))
@@ -479,7 +740,6 @@ function createLane(agent, events, trackW) {
     blocks.push({ ev, block })
   }
 
-  // draw links after layout
   requestAnimationFrame(() => {
     let d = ''
     for (let i = 0; i < blocks.length - 1; i++) {
@@ -549,8 +809,10 @@ function createEventBlock(ev, trackW, agentEvents = []) {
     stopPlayback()
     const i = state.filtered.findIndex(x => x._idx === ev._idx)
     if (i >= 0) state.playback.idx = i
+    // The ONE ring: remove from all, add to this
     document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
-    block.classList.add('selected')
+    document.querySelectorAll('.aurora-ring').forEach(b => b.classList.remove('aurora-ring'))
+    block.classList.add('selected', 'aurora-ring')
     applyPlaybackHighlight(false)
     openDrawer(ev)
     ensurePlaybackBar()
@@ -559,6 +821,7 @@ function createEventBlock(ev, trackW, agentEvents = []) {
 }
 
 function renderLegend() {
+  const $legend = $('legend')
   $legend.innerHTML = ''
   for (const type of getAllTypeKeys(state.events)) {
     const col = getTypeColor(type)
@@ -576,6 +839,7 @@ function renderLegend() {
   }
 }
 
+// ─── Drawer ────────────────────────────────────────────────────────────────
 function openDrawer(ev) {
   state.selectedEvent = ev
   const col = getTypeColor(ev.type)
@@ -597,37 +861,123 @@ function openDrawer(ev) {
   } else $durRow.classList.add('hidden')
 
   $('drawer-message').textContent = ev.message || '—'
-  $('drawer-raw').textContent = JSON.stringify(ev._raw, null, 2)
+  $('drawer-raw').textContent = JSON.stringify(ev.raw ?? ev, null, 2)
+  const $drawer = $('detail-drawer')
+  const $backdrop = $('drawer-backdrop')
   $drawer.classList.remove('hidden'); $drawer.classList.add('open')
   $backdrop.classList.remove('hidden'); $backdrop.classList.add('open')
 }
 
 function closeDrawer() {
+  const $drawer = $('detail-drawer')
+  const $backdrop = $('drawer-backdrop')
   $drawer.classList.remove('open'); $backdrop.classList.remove('open')
   setTimeout(() => { $drawer.classList.add('hidden'); $backdrop.classList.add('hidden') }, 260)
   document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
+  document.querySelectorAll('.aurora-ring').forEach(b => b.classList.remove('aurora-ring'))
   state.selectedEvent = null
 }
 
+// ─── TB-2: Share with lz-string ────────────────────────────────────────────
 function shareTrace() {
   if (!state.events.length) return
-  if (state.events.length > 50) return showToast(t('toast_share_small'))
-  const encoded = encodeTraceURL(state.events)
-  const url = location.origin + location.pathname + '#trace=' + encoded
+
+  // Determine events to share
+  const eventsToShare = state.filtered.length ? state.filtered : state.events
+
+  // TB-3: Apply redaction if enabled
+  let shareEvents = eventsToShare
+  let redactedCount = 0
+  if (state.redactEnabled) {
+    const fakeTrace = { format: state.traceFormat, events: eventsToShare, warnings: [], meta: {} }
+    const { trace: redacted, hits } = redactTrace(fakeTrace)
+    shareEvents = redacted.events
+    redactedCount = hits
+  } else {
+    // TB-3: warn if secrets detected
+    const rawText = eventsToShare.map(e => JSON.stringify(e.raw ?? e)).join('\n')
+    if (hasSecrets(rawText)) {
+      ensureSecretsWarning(true)
+    }
+  }
+
+  const encoded = encodeShareURL(shareEvents)
+  const url = location.origin + location.pathname + '#t2=' + encoded
+
+  if (url.length > MAX_SHARE_URL) {
+    showURLTooLongDialog(url)
+    return
+  }
+
+  showSharePopup(url, redactedCount)
+}
+
+function showSharePopup(url, redactedCount) {
   document.querySelector('.share-popup')?.remove()
   const popup = document.createElement('div')
-  popup.className = 'share-popup'
+  popup.className = 'share-popup card'
   popup.innerHTML = `
     <div class="share-popup-title">${t('share_title')}</div>
-    <p style="font-size:11px;color:var(--text-dim)">${t('share_note')}</p>
-    <input readonly value="${url}" id="share-url-input"/>
-    <button class="btn-primary" style="font-size:12px;padding:6px 16px" id="btn-copy-url">Copy</button>`
+    <p class="notice-text">${t('share_note')}</p>
+    <label class="share-redact-row">
+      <input type="checkbox" id="share-redact-toggle" ${state.redactEnabled ? 'checked' : ''}/>
+      ${t('redact_label')}
+    </label>
+    ${redactedCount > 0 ? `<div class="chip chip--ok share-redact-count">${t('redacted_count', { n: redactedCount })}</div>` : ''}
+    <input readonly value="${url}" id="share-url-input" class="share-url-input"/>
+    <button class="btn-primary" id="btn-copy-url">Copy</button>`
   document.body.appendChild(popup)
   $('share-url-input').select()
   $('btn-copy-url').onclick = () => navigator.clipboard.writeText(url).then(() => { showToast(t('toast_copied')); popup.remove() })
+  $('share-redact-toggle').onchange = (e) => {
+    state.redactEnabled = e.target.checked
+    popup.remove()
+    shareTrace()
+  }
   setTimeout(() => document.addEventListener('click', () => popup.remove(), { once: true }), 100)
 }
 
+function showURLTooLongDialog(longUrl) {
+  document.querySelector('.share-too-long')?.remove()
+  const dialog = document.createElement('div')
+  dialog.className = 'share-too-long card'
+  dialog.innerHTML = `
+    <div class="share-popup-title">⚠️ ${t('share_url_too_long')}</div>
+    <div class="dialog-actions">
+      <button class="btn-primary" id="btn-export-snapshot">${t('share_export_snapshot')}</button>
+      <button class="btn-ghost" id="btn-share-filtered">${t('share_filtered_only')}</button>
+    </div>`
+  document.body.appendChild(dialog)
+  $('btn-export-snapshot').onclick = () => { dialog.remove(); exportSnapshot() }
+  $('btn-share-filtered').onclick = () => {
+    dialog.remove()
+    // share only first 200 events
+    const limited = (state.filtered.length ? state.filtered : state.events).slice(0, 200)
+    const encoded = encodeShareURL(limited)
+    const url = location.origin + location.pathname + '#t2=' + encoded
+    showSharePopup(url, 0)
+  }
+  setTimeout(() => document.addEventListener('click', () => dialog.remove(), { once: true }), 100)
+}
+
+// TB-3: Secrets warning chip
+function ensureSecretsWarning(show) {
+  let chip = $('secrets-warning-chip')
+  if (!chip) {
+    chip = document.createElement('span')
+    chip.id = 'secrets-warning-chip'
+    chip.className = 'chip chip--danger secrets-warning'
+    $('btn-share')?.insertAdjacentElement('afterend', chip)
+  }
+  if (show) {
+    chip.textContent = t('redact_warning')
+    chip.classList.remove('hidden')
+  } else {
+    chip.classList.add('hidden')
+  }
+}
+
+// ─── Export snapshot ───────────────────────────────────────────────────────
 function exportSnapshot() {
   const html = `<!doctype html><meta charset=utf-8><title>Traceboard Snapshot</title>
   <body style="font-family:monospace;background:#060d1a;color:#e2e8f0;padding:24px">
@@ -648,37 +998,202 @@ function exportSnapshot() {
   showToast(t('toast_export'))
 }
 
+// ─── URL hash handling (TB-2 + legacy) ────────────────────────────────────
 function checkURLHash() {
   const hash = location.hash
-  if (!hash.startsWith('#trace=')) return
-  const raw = decodeTraceURL(hash.slice('#trace='.length))
-  if (raw?.length) loadTraceText(raw.map(e => JSON.stringify(e)).join('\n'), 'shared-trace.jsonl')
+  if (hash.startsWith('#t2=')) {
+    const raw = decodeShareURL(hash.slice('#t2='.length))
+    if (raw?.length) {
+      const synth = raw.map(e => JSON.stringify(e)).join('\n')
+      loadTraceText(synth, 'shared-trace.jsonl')
+    }
+    return
+  }
+  // legacy base64
+  if (hash.startsWith('#trace=')) {
+    const raw = decodeLegacyURL(hash.slice('#trace='.length))
+    if (raw?.length) loadTraceText(raw.map(e => JSON.stringify(e)).join('\n'), 'shared-trace.jsonl')
+  }
 }
 
+// ─── Toast ────────────────────────────────────────────────────────────────
 let toastTimer
 function showToast(msg, type = 'info') {
+  const $toast = $('toast')
   $toast.textContent = msg
   $toast.classList.remove('hidden')
-  $toast.style.borderColor = type === 'error' ? 'var(--rose)' : 'var(--teal)'
+  $toast.style.borderColor = type === 'error' ? 'var(--status-danger, var(--rose))' : 'var(--aurora-teal-400, var(--teal))'
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => $toast.classList.add('hidden'), 3200)
 }
 
+// ─── TB-3: Redaction toggle (also in share popup) ─────────────────────────
+function renderRedactToggle() {
+  let row = $('redact-toggle-row')
+  if (!row) {
+    row = document.createElement('label')
+    row.id = 'redact-toggle-row'
+    row.className = 'redact-toggle-row'
+    row.innerHTML = `<input type="checkbox" id="redact-toggle" ${state.redactEnabled ? 'checked' : ''}/>
+      <span>${t('redact_label')}</span>`
+    // Insert near share button
+    const header = document.querySelector('.header-right')
+    header?.insertBefore(row, $('btn-share'))
+    $('redact-toggle').onchange = (e) => {
+      state.redactEnabled = e.target.checked
+      if (!e.target.checked) {
+        const rawText = state.events.map(ev => JSON.stringify(ev.raw ?? ev)).join('\n')
+        ensureSecretsWarning(hasSecrets(rawText))
+      } else {
+        ensureSecretsWarning(false)
+      }
+    }
+  }
+}
+
+// ─── Command palette (⌘K) ────────────────────────────────────────────────
+function setupCommandPalette() {
+  palette = new CommandPalette([], { placeholder: t('palette_placeholder') })
+  palette.mount()
+
+  // Register commands
+  const cmds = [
+    {
+      id: 'load-demo',
+      group: 'File',
+      label: t('cmd_load_demo'),
+      run: () => loadDemo(),
+    },
+    {
+      id: 'export',
+      group: 'File',
+      label: t('cmd_export'),
+      when: () => state.events.length > 0,
+      run: () => exportSnapshot(),
+    },
+    {
+      id: 'share',
+      group: 'File',
+      label: t('cmd_share'),
+      when: () => state.events.length > 0,
+      run: () => shareTrace(),
+    },
+    {
+      id: 'toggle-redact',
+      group: 'Settings',
+      label: t('cmd_toggle_redact'),
+      hint: () => state.redactEnabled ? 'ON' : 'OFF',
+      run: () => {
+        state.redactEnabled = !state.redactEnabled
+        const toggle = $('redact-toggle')
+        if (toggle) toggle.checked = state.redactEnabled
+        showToast(`Redaction: ${state.redactEnabled ? 'ON' : 'OFF'}`)
+      },
+    },
+    {
+      id: 'theme',
+      group: 'Settings',
+      label: t('cmd_theme'),
+      run: () => document.querySelector('[data-aurora-theme-toggle]')?.click(),
+    },
+    {
+      id: 'clear-filters',
+      group: 'View',
+      label: t('cmd_clear_filters'),
+      when: () => state.activeTypes.size > 0,
+      run: () => { state.activeTypes.clear(); applyFilters() },
+    },
+    {
+      id: 'library',
+      group: 'File',
+      label: t('cmd_library'),
+      run: () => { showHero() },
+    },
+  ]
+
+  // Dynamic: jump to event
+  cmds.push({
+    id: 'jump-event',
+    group: 'Navigate',
+    label: t('cmd_jump_event'),
+    when: () => state.events.length > 0,
+    run: () => {
+      // Open a mini event picker (reuse palette with event commands)
+      const eventCmds = state.filtered.slice(0, 100).map((ev, i) => ({
+        id: `ev-${i}`,
+        group: ev.agent,
+        label: `#${ev._idx} [${ev.type}] ${ev.message?.slice(0, 50) || ''}`,
+        run: () => {
+          state.playback.idx = i
+          applyPlaybackHighlight(true)
+          ensurePlaybackBar()
+        }
+      }))
+      // Temporarily replace commands
+      const saved = palette.commands
+      palette.commands = eventCmds
+      palette.open()
+      // Restore on close
+      const origClose = palette.close.bind(palette)
+      palette.close = () => { origClose(); palette.commands = saved; palette.close = origClose }
+    }
+  })
+
+  // Dynamic: filter by agent
+  cmds.push({
+    id: 'filter-agent',
+    group: 'Navigate',
+    label: t('cmd_filter_agent'),
+    when: () => state.events.length > 0,
+    run: () => {
+      const agents = getAllAgentKeys(state.events)
+      const agentCmds = agents.map(agent => ({
+        id: `agent-${agent}`,
+        group: 'Agent',
+        label: agent,
+        run: () => {
+          state.events = state.events.filter(e => e.agent === agent)
+          state.filtered = state.events
+          renderAll()
+        }
+      }))
+      const saved = palette.commands
+      palette.commands = agentCmds
+      palette.open()
+      const origClose = palette.close.bind(palette)
+      palette.close = () => { origClose(); palette.commands = saved; palette.close = origClose }
+    }
+  })
+
+  for (const cmd of cmds) palette.register(cmd)
+}
+
+// ─── Buttons ───────────────────────────────────────────────────────────────
 function setupButtons() {
-  $btnDemo.onclick = loadDemo
-  $btnLang.onclick = () => { setLang(currentLang === 'en' ? 'zh' : 'en'); if (state.stats) updateToolbar() }
-  $btnShare.onclick = shareTrace
-  $btnExport.onclick = exportSnapshot
-  $btnBack.onclick = showHero
-  $btnReset.onclick = () => { state.activeTypes.clear(); applyFilters() }
+  $('btn-demo').onclick = loadDemo
+  $('btn-lang').onclick = () => { setLang(currentLang === 'en' ? 'zh' : 'en'); if (state.stats) updateToolbar() }
+  $('btn-share').onclick = shareTrace
+  $('btn-export').onclick = exportSnapshot
+  $('btn-back').onclick = showHero
+  $('btn-reset-view').onclick = () => { state.activeTypes.clear(); applyFilters() }
   $('btn-close-drawer').onclick = closeDrawer
-  $backdrop.onclick = closeDrawer
+  $('drawer-backdrop').onclick = closeDrawer
+
+  // Redact toggle in header
+  renderRedactToggle()
+
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeDrawer()
     if (!state.events.length) return
-    if (e.key === ' ') { e.preventDefault(); togglePlayback(); ensurePlaybackBar() }
-    if (e.key === 'ArrowRight') { stopPlayback(); stepPlayback(1) }
-    if (e.key === 'ArrowLeft') { stopPlayback(); stepPlayback(-1) }
+    if (e.key === ' ' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+      e.preventDefault(); togglePlayback(); ensurePlaybackBar()
+    }
+    if (e.key === 'ArrowRight' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+      stopPlayback(); stepPlayback(1)
+    }
+    if (e.key === 'ArrowLeft' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+      stopPlayback(); stepPlayback(-1)
+    }
   })
   let resizeTimer
   addEventListener('resize', () => {

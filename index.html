@@ -1,11 +1,16 @@
 <!DOCTYPE html>
-<html lang="en" data-lang="en">
+<html lang="en" data-lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Traceboard — shareable multi-agent orchestration trace player. Drop a JSONL trace, replay your agent run." />
+  <meta name="description" content="Traceboard — shareable multi-agent orchestration trace player. Drop a JSONL trace, replay your agent run. Zero backend, local-first." />
+  <meta name="theme-color" content="#050814" />
   <title>Traceboard · Agent Trace Player</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>🌊</text></svg>" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <!-- Aurora UI design system FIRST, then app styles -->
+  <link rel="stylesheet" href="./src/vendor/aurora-ui/aurora-ui.css" />
+  <link rel="stylesheet" href="./src/vendor/aurora-ui/aurora-ui.v2.css" />
   <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
@@ -17,9 +22,11 @@
       <span class="tagline" data-i18n="tagline">Agent Trace Player</span>
     </div>
     <div class="header-right">
+      <!-- TB-3: Redact toggle is injected by main.js here -->
       <button id="btn-lang" class="btn-ghost" title="Toggle language">EN / 中</button>
       <button id="btn-share" class="btn-ghost" title="Share trace URL" data-i18n="share">Share</button>
       <button id="btn-export" class="btn-ghost" title="Export snapshot" data-i18n="export">Export</button>
+      <button data-aurora-theme-toggle class="btn-ghost" title="Toggle theme" aria-label="Toggle theme">🌙</button>
       <a href="https://github.com/Zijian-Ni/traceboard" target="_blank" class="btn-ghost" title="GitHub">★ GitHub</a>
     </div>
   </header>
@@ -46,6 +53,8 @@
         </button>
         <span class="hero-hint" data-i18n="demo_hint">Real trace from a 3-agent aurora orchestra run</span>
       </div>
+
+      <!-- TB-A3: Library bento injected here by main.js -->
     </div>
   </section>
 
@@ -56,6 +65,7 @@
       <div class="toolbar-left">
         <span class="trace-name" id="trace-filename">trace.jsonl</span>
         <span class="trace-stats" id="trace-stats"></span>
+        <!-- TB-1: format badge injected after trace-stats -->
       </div>
       <div class="toolbar-filters">
         <label class="filter-label" data-i18n="filter_by">Filter:</label>
@@ -66,6 +76,8 @@
         <button id="btn-back" class="btn-sm btn-ghost" data-i18n="back_to_hero">← Load another</button>
       </div>
     </div>
+
+    <!-- TB-1: Warnings bar injected by main.js -->
 
     <!-- Summary bar -->
     <div id="summary-bar" class="hidden">
@@ -124,5 +136,13 @@
   <div id="toast" class="hidden" role="alert" aria-live="polite"></div>
 
   <script type="module" src="./src/main.js"></script>
+  <!-- PWA service worker registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>
