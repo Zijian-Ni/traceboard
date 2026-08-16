@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a new format adapter, UI feature, or integration
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Traceboard's north star: **"the VLC player for agent traces"** —
+        any format, drag it in, it plays, the URL is the share mechanism.
+        Features that require a backend or API keys are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the workflow pain point, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would the feature work from a user's perspective?
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - New trace format adapter
+        - UI / visualisation
+        - Sharing / export
+        - PWA / offline
+        - Performance
+        - Developer experience
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraint check
+      description: Traceboard is MIT-licensed, zero-backend, local-first.
+      options:
+        - label: This feature works without a backend or API key
+          required: true
+        - label: This feature can be shipped with zero new runtime dependencies (or I've justified the dep)
+          required: false

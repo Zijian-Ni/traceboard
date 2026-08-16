@@ -1,0 +1,44 @@
+name: Bug report
+description: Something displayed wrong, threw, or caused a white screen
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Please redact your trace before pasting** —
+        Traceboard's built-in Share panel has a "Redact secrets & paths" toggle (ON by default).
+  - type: dropdown
+    id: format
+    attributes:
+      label: Trace format
+      options: [claude-code, otel-genai, aurora, unknown / not sure]
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Minimal sample (redacted)
+      description: The smallest JSONL that reproduces the problem. Redact before pasting.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected vs what happened
+    validations:
+      required: true
+  - type: textarea
+    id: browser
+    attributes:
+      label: Browser + OS
+      placeholder: "Chrome 126 / macOS 14"
+    validations:
+      required: false
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Did you search existing issues?
+      options:
+        - label: Yes, I searched and found nothing similar
+          required: true

@@ -1,26 +1,49 @@
 # 🌊 Traceboard
 
-> **Drop a JSONL trace, replay what your agents actually did.** Zero backend. Pure static.
+> **The VLC player for agent traces.** Any format, drag it in, it plays. The URL is the share mechanism. Never needs a backend.
 
 <!-- GIF PLACEHOLDER: replace this line with your screen recording -->
 ![Traceboard demo GIF](docs/demo.gif)
 
+[![CI](https://github.com/Zijian-Ni/traceboard/actions/workflows/test.yml/badge.svg)](https://github.com/Zijian-Ni/traceboard/actions/workflows/test.yml)
+[![Live Demo](https://img.shields.io/badge/demo-live-teal.svg)](https://zijian-ni.github.io/traceboard/)
 [![MIT License](https://img.shields.io/badge/license-MIT-teal.svg)](LICENSE)
-[![Static Site](https://img.shields.io/badge/deploy-GitHub%20Pages-violet.svg)]()
 [![Zero Backend](https://img.shields.io/badge/backend-none-success.svg)]()
+[![Zero Telemetry](https://img.shields.io/badge/telemetry-zero-violet.svg)]()
+
+**Part of the [Aurora Evidence Suite](https://github.com/Zijian-Ni/aurora-evidence-suite)** — local-first evidence tools for AI agents.
 
 ---
 
-## Why not another dashboard?
+## 30-second Quickstart
 
-Most agent observability tools require:
-- A backend / database
-- An API key you paste into a settings form
-- A Docker container or cloud account
+```bash
+git clone https://github.com/Zijian-Ni/traceboard
+cd traceboard
+npm install
+npm run dev          # → http://localhost:5173
+```
 
-Traceboard needs **nothing**. Drag in a `.jsonl` file from your local run,
-see swimlanes by agent, click events for details, share a URL with colleagues
-— or show it to a hiring manager at a conference on your phone.
+Drag in any `.jsonl` trace, or click **Load Live Demo** to replay a real 3-agent Aurora Orchestra run.
+
+**Drop a Claude Code session file directly:**
+```
+~/.claude/projects/<project>/<session-id>.jsonl
+```
+Traceboard auto-detects the format and renders it as a swimlane timeline.
+
+---
+
+## Supported Formats
+
+| Format | Auto-detected from | Typical source |
+|---|---|---|
+| **Claude Code** ✨ | `uuid`/`parentUuid` + `type: user\|assistant\|system\|summary` | `~/.claude/projects/<project>/<session>.jsonl` |
+| **OTel GenAI** | `resourceSpans` / `spanId`+`traceId` | LangChain, CrewAI, AutoGen, Datadog, Honeycomb, Grafana |
+| **Aurora** | `type` + `ts`/`agent` fields | Aurora Orchestra, OpenClaw `trace-emit` (OpenClaw = a self-hosted LLM gateway), custom scripts |
+| **Unknown** | — | Parsed with a permissive fallback + a visible notice. Never a white screen. |
+
+Format detection is automatic. A format chip in the header shows which adapter was used.
 
 ---
 
@@ -28,88 +51,86 @@ see swimlanes by agent, click events for details, share a URL with colleagues
 
 | | |
 |---|---|
-| 🏊 **Swimlanes by agent** | Every agent gets its own row. Phase boundaries shown as dividers. |
-| 🏷️ **Event type filters** | Toggle `phase_start`, `agent_call`, `error`, etc. chips to focus. |
-| 🔍 **Detail drawer** | Click any event → full JSON + duration of its phase. |
-| 🔗 **Share via URL** | Encodes up to 50 events as base64url in the `#trace=` hash. |
-| 📤 **Export HTML snapshot** | Self-contained dark HTML table you can email or commit. |
-| 🌐 **Bilingual CN/EN** | Toggle in the header. |
-| 📱 **Mobile responsive** | Works on phones. |
-
----
-
-## Quickstart
-
-```bash
-# Clone
-git clone https://github.com/Zijian-Ni/traceboard
-cd traceboard
-
-# Install (only dev dependency: Vite)
-npm install
-
-# Dev server with hot reload
-npm run dev
-
-# Build for GitHub Pages
-npm run build
-
-# Preview the build
-npm run preview
-```
-
-Open [http://localhost:5173](http://localhost:5173) and click **Load Live Demo**
-to replay the bundled Aurora Orchestra triple-agent run.
-
-Or drag any `.jsonl` trace you have locally.
-
----
-
-## Trace format
-
-Your JSONL must have one JSON object per line. Minimal example:
-
-```jsonl
-{"ts":"2026-08-15T18:35:00Z","type":"phase_start","phase":"plan","agent":"conductor","message":"Begin planning"}
-{"ts":"2026-08-15T18:35:10Z","type":"agent_call","phase":"plan","agent":"worker","message":"Delegating to worker"}
-{"ts":"2026-08-15T18:36:00Z","type":"phase_end","phase":"plan","agent":"conductor","message":"Plan done"}
-```
-
-**Supported fields** (all optional except one must exist):
-
-| Field | Description |
-|---|---|
-| `ts` / `timestamp` | ISO-8601 string |
-| `type` / `event_type` | e.g. `phase_start`, `agent_call`, `error` |
-| `agent` / `agent_id` | Lane name |
-| `phase` / `stage` | Groups events into phase bands |
-| `message` / `msg` | Human-readable description |
+| 🏊 **Swimlanes by agent** | Every agent gets its own row with dashed connector lines. |
+| 🏷️ **Event type filters** | Toggle `phase_start`, `agent_call`, `error`, etc. |
+| ▶️ **Cinematic playback** | Step through events or let it play automatically. |
+| 🔍 **Detail drawer** | Click any event → full raw JSON + phase duration. |
+| 🔗 **Compressed sharing** | lz-string `#t2=` URL (5–10× smaller than base64). MAX 8 000 chars. Legacy `#trace=` links still open. |
+| 🛡️ **Redaction (default ON)** | Strips API keys, tokens, home paths, emails before sharing. Shows "Redacted N items". |
+| 📤 **Export HTML snapshot** | Self-contained dark HTML table, email-able or committable. |
+| ⚡ **Streaming parse** | Web Worker streams JSONL in 500-line batches — 100 MB file, first paint under 1 s. |
+| 📚 **Trace Library** | IndexedDB stores recent traces as a `.bento` card grid. Browser-local only. |
+| 📱 **PWA / offline** | Installable. Works fully offline once cached. |
+| ⌘K **Command palette** | Jump to event, switch agent filter, export, toggle redaction. |
+| 🌐 **Bilingual CN/EN** | All UI strings in `src/i18n.js`. |
+| 🎨 **Dark / light / auto theme** | Persisted to `localStorage`. |
 
 ---
 
 ## Architecture
 
-```mermaid
-graph TD
-    A["trace.jsonl (local or URL hash)"]
-    B["parseJSONL + normalizeEvents"]
-    C["groupByAgent → swimlanes"]
-    D["typeFilters → filtered events"]
-    E["event-block DOM elements"]
-    F["detail drawer (click)"]
-    G["share #trace= hash / export HTML"]
-
-    A --> B
-    B --> C
-    B --> D
-    C --> E
-    D --> E
-    E --> F
-    E --> G
+```
+traceboard/
+├── index.html               # Single-page app shell + PWA manifest link
+├── src/
+│   ├── main.js              # App logic (TB-1–TB-3, TB-A1, TB-A3, ⌘K)
+│   ├── style.css            # Aurora dark theme
+│   ├── i18n.js              # EN/中文 strings
+│   ├── trace.js             # Delegates to trace-kit; lz-string encode/decode
+│   ├── colors.js            # Agent + event type palette
+│   ├── parse.worker.js      # TB-A1: streaming JSONL Web Worker
+│   ├── library.js           # TB-A3: IndexedDB trace library
+│   └── vendor/
+│       ├── trace-kit/       # @aurora-suite/trace-kit (vendored, zero-dep)
+│       └── aurora-ui/       # Aurora UI design system (vendored)
+├── public/
+│   ├── demo/                # Sample traces (aurora, claude-code, otel-genai, secrets)
+│   ├── manifest.webmanifest # PWA manifest
+│   └── sw.js                # Service worker (offline support)
+├── test/
+│   ├── share-url.test.js    # Round-trip, redaction, format detection tests
+│   └── worker-perf.mjs      # TB-A1 synthetic 100 MB benchmark
+└── .github/workflows/test.yml
 ```
 
-Everything runs in-browser. No fetch to any server after the initial page load
-(except `./demo/` for the bundled demo).
+Everything runs in-browser. No fetch to any server after initial page load
+(except `./demo/` for the bundled demo). No API keys. No telemetry.
+
+---
+
+## Sharing & Redaction
+
+The **Share** button opens a popup with:
+- **Redact secrets & paths** checkbox (default ON) — calls `redactTrace()` from trace-kit before encoding.
+- After sharing, a toast shows "Redacted N items".
+- If redaction is OFF and secrets are detected, a red warning chip appears next to the Share button.
+- The share URL uses lz-string compression (`#t2=` prefix), typically 5–10× smaller than the old base64 format.
+- URLs over 8 000 chars show a dialog: **Export HTML snapshot** or **Share only filtered events**.
+- Legacy `#trace=` base64 URLs from v0.3 still open correctly.
+
+---
+
+## PWA / Offline
+
+```bash
+# Build and deploy
+npm run build
+
+# Install from browser
+# Chrome/Edge: address bar → install icon
+# iOS Safari: Share → Add to Home Screen
+```
+
+Once installed, Traceboard works fully offline — static assets and demo traces are pre-cached by the service worker. Your trace library (IndexedDB) is browser-local; nothing is synced anywhere.
+
+---
+
+## Running tests
+
+```bash
+npm test                  # node --test — 17 tests, no external framework
+node test/worker-perf.mjs # TB-A1 benchmark: 100 MB JSONL, first paint <1s
+```
 
 ---
 
@@ -117,49 +138,28 @@ Everything runs in-browser. No fetch to any server after the initial page load
 
 ```bash
 npm run build
-# dist/ is the output — push it to gh-pages branch
-# or set GitHub Pages source to /dist
+# Push dist/ to gh-pages branch, or set GitHub Pages source to /dist
 ```
-
-`vite.config.js` uses `base: './'` so all assets resolve correctly from any
-sub-path.
 
 ---
 
-## ⭐ Use it to prove your agent run
+## 中文说明
 
-The hardest part of showcasing multi-agent work isn't building the system —
-it's making the run *legible* to someone who wasn't there.
+**Traceboard** 是 Aurora Evidence Suite 的"前台门面"：把你的 AI Agent 运行轨迹变成可分享的泳道时间线。
 
-**Traceboard turns your `trace.jsonl` into evidence:**
-- A hiring manager sees parallel lanes and real timestamps, not just log lines.
-- A teammate can replay the exact sequence that triggered a bug.
-- You can share a URL that encodes the whole trace — no server needed.
+**主要特性：**
+- 拖入 `.jsonl` 文件即可自动识别格式（Claude Code / OTel GenAI / Aurora）
+- 可拖入 Claude Code 会话文件：`~/.claude/projects/<项目>/<会话ID>.jsonl`
+- ⌘K 命令面板：跳转事件、按 Agent 过滤、切换脱敏
+- 分享链接默认开启脱敏（自动去除 API 密钥、路径、邮件等）
+- IndexedDB 本地轨迹库，100% 离线，不上传任何数据
+- 支持 PWA 安装，断网可用
+- 中英文双语界面
 
-If your agent system produces traces, Traceboard makes them shareable in 30 seconds.
-
----
-
-## File structure
-
-```
-traceboard/
-├── index.html          # Single-page app shell
-├── src/
-│   ├── main.js         # App logic, event wiring
-│   ├── style.css       # Aurora dark theme
-│   ├── i18n.js         # EN/ZH strings
-│   ├── trace.js        # JSONL parse, layout, encode/decode
-│   └── colors.js       # Agent + event type palette
-├── public/
-│   └── demo/
-│       ├── trace.jsonl # Bundled Aurora Orchestra trace
-│       └── summary.md  # Mission brief
-├── docs/
-│   └── HOMEPAGE.md     # Portfolio card copy
-├── vite.config.js
-├── package.json
-└── README.md
+**快速开始：**
+```bash
+git clone https://github.com/Zijian-Ni/traceboard
+cd traceboard && npm install && npm run dev
 ```
 
 ---
