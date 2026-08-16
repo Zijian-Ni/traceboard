@@ -1,0 +1,7 @@
+{"ts":"2026-08-16T10:00:00.000Z","type":"phase_start","agent":"xiaoluo","phase":"plan","message":"Planning the triple-agent run"}
+{"ts":"2026-08-16T10:00:04.000Z","type":"llm_call","agent":"xiaoluo","name":"claude-opus-4-7","message":"conductor drafting lane prompts","durationMs":3900}
+{"timestamp":"2026-08-16T10:00:09.000Z","event_type":"tool_call","agent_id":"hermes","tool":"web_search","msg":"searching for OTel GenAI semconv status"}
+{"ts":"2026-08-16T10:00:12.500Z","type":"tool_result","agent":"hermes","status":"ok","message":"7 results","durationMs":3500}
+{"ts":"2026-08-16T10:00:15.000Z","type":"error","agent":"dsh","message":"DEEPSEEK_API_KEY missing, lane degraded to mock"}
+{"ts":"2026-08-16T10:00:31.000Z","type":"phase_end","agent":"xiaoluo","phase":"synthesize","status":"ok","message":"evidence pack written"}
+{"type":"note","agent":"xiaoluo","message":"line without any timestamp — clock must be synthesised"}

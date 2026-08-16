@@ -7,36 +7,31 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
-// ── Inline vendored encodeShareURL / decodeShareURL ────────────────────────
-// We can't use the browser build directly, so test the underlying logic.
 import LZString from 'lz-string'
 
-function encodeShareURL(events) {
-  const slim = events.map(({ ts, type, agent, phase, name, message, status, durationMs }) => {
-    const o = { ts, type, agent }
-    if (phase != null) o.phase = phase
-    if (name != null) o.name = name
-    if (message != null) o.message = message
-    if (status != null) o.status = status
-    if (durationMs != null) o.durationMs = durationMs
-    return o
-  })
-  return LZString.compressToEncodedURIComponent(JSON.stringify(slim))
-}
+// Import the REAL implementations instead of re-declaring them here. A test
+// that reimplements the code under test can only prove the copy works; it
+// cannot catch a bug in what actually ships. This file previously inlined its
+// own decodeShareURL, which is exactly why a real cross-tool decode bug
+// (Aurora Orchestra sends JSONL, not a JSON array) went unnoticed.
+import {
+  encodeShareURL,
+  decodeShareURL,
+  parseTrace,
+  computeStats,
+  redactTrace,
+  hasSecrets,
+  detectFormat,
+  redact,
+} from '../src/trace.js'
 
-function decodeShareURL(encoded) {
-  try {
-    const json = LZString.decompressFromEncodedURIComponent(encoded)
-    return json ? JSON.parse(json) : null
-  } catch { return null }
-}
-
-// ── trace-kit imports (from vendored copy) ─────────────────────────────────
-// For Node tests we reference trace-kit directly (not browser vendor copy)
-import { parseTrace, computeStats, redactTrace, hasSecrets, detectFormat, redact } from '/home/xiaoni/projects/trace-kit/src/index.js'
-
-const FIXTURE_DIR = '/home/xiaoni/projects/trace-kit/test/fixtures/'
+// Fixtures resolve relative to this file, so the suite runs on a clean
+// checkout without assuming where a sibling repo lives on disk.
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'demo') + '/'
 
 // ── TB-1: Format detection ─────────────────────────────────────────────────
 describe('TB-1: format detection', () => {
@@ -228,4 +223,40 @@ describe('computeStats', () => {
     assert.ok(stats.durationMs >= 0)
     assert.ok(stats.startISO !== null || stats.startMs === 0)
   })
+})
+
+/**
+ * Cross-tool regression (Aurora Evidence Suite).
+ *
+ * Aurora Orchestra's "Open in Traceboard" button compresses its trace as
+ * newline-delimited JSON, while Traceboard's own share button compresses a
+ * JSON array. Both arrive on the same #t2= fragment.
+ *
+ * Before this test the decoder only understood the array form, so the deep
+ * link that closes the loop across the whole suite silently decoded to null.
+ * Each project verified its own half in isolation and both looked correct.
+ */
+test('TB-2: #t2= accepts both JSON-array and JSONL payloads', () => {
+  const events = [
+    { ts: '2026-08-16T10:00:00.000Z', type: 'phase_start', agent: 'xiaoluo', message: 'plan' },
+    { ts: '2026-08-16T10:00:05.000Z', type: 'tool_call', agent: 'hermes', name: 'web_search' },
+  ]
+
+  // Traceboard's own encoding must keep working.
+  const own = decodeShareURL(encodeShareURL(events))
+  assert.equal(own.length, 2)
+  assert.equal(own[1].agent, 'hermes')
+
+  // Aurora Orchestra's encoding: JSONL rather than an array.
+  const jsonl = LZString.compressToEncodedURIComponent(
+    events.map((e) => JSON.stringify(e)).join('\n'),
+  )
+  const fromOrchestra = decodeShareURL(jsonl)
+  assert.ok(Array.isArray(fromOrchestra), 'JSONL payload must decode to an array')
+  assert.equal(fromOrchestra.length, 2)
+  assert.equal(fromOrchestra[0].type, 'phase_start')
+  assert.equal(fromOrchestra[1].name, 'web_search')
+
+  // Garbage still fails closed rather than throwing.
+  assert.equal(decodeShareURL('!!!not-valid'), null)
 })

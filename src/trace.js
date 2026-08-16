@@ -60,10 +60,47 @@ export function encodeShareURL(events) {
   return LZString.compressToEncodedURIComponent(JSON.stringify(slim))
 }
 
+/**
+ * Decode a v2 share fragment.
+ *
+ * Accepts BOTH payload shapes on purpose:
+ *   - a JSON array   (what encodeShareURL above produces)
+ *   - newline-delimited JSON (what Aurora Orchestra's "Open in Traceboard"
+ *     button produces, since it compresses its trace as JSONL)
+ *
+ * Traceboard is the consumer at the end of the suite's data flow, so it is the
+ * component that should be liberal in what it accepts. Being strict here meant
+ * the cross-tool deep link silently decoded to null and the loop that the whole
+ * suite is built around appeared broken to the user.
+ */
 export function decodeShareURL(encoded) {
   try {
-    const json = LZString.decompressFromEncodedURIComponent(encoded)
-    return json ? JSON.parse(json) : null
+    const text = LZString.decompressFromEncodedURIComponent(encoded)
+    if (!text) return null
+
+    const trimmed = text.trim()
+    if (!trimmed) return null
+
+    // Fast path: a JSON array (or single object) document.
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const doc = JSON.parse(trimmed)
+        if (Array.isArray(doc)) return doc
+        // A single object is only a valid payload if it is not JSONL below.
+        if (!trimmed.includes('\n')) return [doc]
+      } catch {
+        // Fall through to JSONL parsing: a JSONL payload also starts with '{'.
+      }
+    }
+
+    // JSONL path.
+    const events = []
+    for (const line of trimmed.split('\n')) {
+      const s = line.trim()
+      if (!s) continue
+      try { events.push(JSON.parse(s)) } catch { /* skip bad line */ }
+    }
+    return events.length ? events : null
   } catch { return null }
 }
 
