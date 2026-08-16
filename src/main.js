@@ -1,6 +1,5 @@
 /**
- * Traceboard — main entry point
- * Aurora dark theme · multi-agent trace player · zero backend
+ * Traceboard v0.3 — cinematic multi-agent trace player
  */
 import { setLang, t, currentLang } from './i18n.js'
 import { getAgentColor, getTypeColor, getAllTypeKeys, getAllAgentKeys } from './colors.js'
@@ -10,7 +9,6 @@ import {
   encodeTraceURL, decodeTraceURL
 } from './trace.js'
 
-// ── State ──────────────────────────────────────────────────
 let state = {
   events: [],
   filtered: [],
@@ -20,143 +18,154 @@ let state = {
   filename: 'trace.jsonl',
   summaryMarkdown: null,
   playback: { playing: false, idx: 0, timer: null, speed: 1 },
-  agentFilter: new Set(),
 }
 
-// ── DOM refs ───────────────────────────────────────────────
-const $hero       = document.getElementById('hero')
-const $viewer     = document.getElementById('trace-viewer')
-const $dropZone   = document.getElementById('drop-zone')
-const $fileInput  = document.getElementById('file-input')
-const $btnDemo    = document.getElementById('btn-demo')
-const $btnLang    = document.getElementById('btn-lang')
-const $btnShare   = document.getElementById('btn-share')
-const $btnExport  = document.getElementById('btn-export')
-const $btnBack    = document.getElementById('btn-back')
-const $btnReset   = document.getElementById('btn-reset-view')
-const $typeFilters = document.getElementById('type-filters')
-const $lanes      = document.getElementById('lanes')
-const $legend     = document.getElementById('legend')
-const $ruler      = document.getElementById('time-ruler')
-const $filename   = document.getElementById('trace-filename')
-const $stats      = document.getElementById('trace-stats')
-const $toast      = document.getElementById('toast')
-const $drawer     = document.getElementById('detail-drawer')
-const $backdrop   = document.getElementById('drawer-backdrop')
-const $summaryBar = document.getElementById('summary-bar')
-const $summaryContent = document.getElementById('summary-content')
+const $ = (id) => document.getElementById(id)
+const $hero = $('hero')
+const $viewer = $('trace-viewer')
+const $dropZone = $('drop-zone')
+const $fileInput = $('file-input')
+const $btnDemo = $('btn-demo')
+const $btnLang = $('btn-lang')
+const $btnShare = $('btn-share')
+const $btnExport = $('btn-export')
+const $btnBack = $('btn-back')
+const $btnReset = $('btn-reset-view')
+const $typeFilters = $('type-filters')
+const $lanes = $('lanes')
+const $legend = $('legend')
+const $ruler = $('time-ruler')
+const $filename = $('trace-filename')
+const $stats = $('trace-stats')
+const $toast = $('toast')
+const $drawer = $('detail-drawer')
+const $backdrop = $('drawer-backdrop')
+const $summaryBar = $('summary-bar')
+const $summaryContent = $('summary-content')
 
-// ── Init ───────────────────────────────────────────────────
 async function init() {
   setLang('en')
   setupDrop()
   setupButtons()
-  ensureThemeDock()
+  ensureChrome()
   checkURLHash()
 }
 
-function ensureThemeDock() {
-  if (document.getElementById('tb-theme-dock')) return
-  const dock = document.createElement('div')
-  dock.id = 'tb-theme-dock'
-  dock.innerHTML = `
-    <button id="tb-theme-toggle" class="tb-theme-toggle" title="Background">🎨</button>
-    <div id="tb-theme-panel" class="tb-theme-panel" hidden>
-      <div class="tb-theme-title">Background</div>
-      <div class="tb-theme-presets">
-        <button data-bg="aurora" class="tb-preset active">Aurora</button>
-        <button data-bg="midnight" class="tb-preset">Midnight</button>
-        <button data-bg="nebula" class="tb-preset">Nebula</button>
-        <button data-bg="ember" class="tb-preset">Ember</button>
+function ensureChrome() {
+  // particle canvas
+  if (!$('tb-fx')) {
+    const c = document.createElement('canvas')
+    c.id = 'tb-fx'
+    c.className = 'tb-fx'
+    document.body.prepend(c)
+    bootParticles(c)
+  }
+  // theme dock
+  if (!$('tb-theme-dock')) {
+    const dock = document.createElement('div')
+    dock.id = 'tb-theme-dock'
+    dock.innerHTML = `
+      <button id="tb-theme-toggle" class="tb-theme-toggle">🎨</button>
+      <div id="tb-theme-panel" class="tb-theme-panel" hidden>
+        <div class="tb-theme-title">Atmosphere</div>
+        <div class="tb-theme-presets">
+          <button data-bg="aurora" class="tb-preset">Aurora</button>
+          <button data-bg="midnight" class="tb-preset">Midnight</button>
+          <button data-bg="nebula" class="tb-preset">Nebula</button>
+          <button data-bg="ember" class="tb-preset">Ember</button>
+        </div>
+        <label class="tb-theme-upload">Custom image / GIF<input id="tb-bg-upload" type="file" accept="image/*,.gif" hidden/></label>
+        <input id="tb-bg-opacity" type="range" min="8" max="80" value="28"/>
+        <button id="tb-bg-clear" class="btn-ghost btn-sm">Clear custom</button>
       </div>
-      <label class="tb-theme-upload">Custom image / GIF
-        <input id="tb-bg-upload" type="file" accept="image/*,.gif" hidden />
-      </label>
-      <input id="tb-bg-opacity" type="range" min="10" max="85" value="30" />
-      <button id="tb-bg-clear" class="btn-ghost btn-sm">Clear custom</button>
-    </div>
-    <div id="tb-custom-bg" class="tb-custom-bg" aria-hidden="true"></div>
-  `
-  document.body.appendChild(dock)
-  const preset = localStorage.getItem('tb_bg_preset') || 'aurora'
-  document.documentElement.dataset.bg = preset
-  dock.querySelectorAll('.tb-preset').forEach(b => b.classList.toggle('active', b.dataset.bg === preset))
-  const op = localStorage.getItem('tb_bg_opacity') || '30'
-  document.documentElement.style.setProperty('--tb-custom-opacity', String(Number(op)/100))
-  const opEl = dock.querySelector('#tb-bg-opacity'); if (opEl) opEl.value = op
-  const custom = localStorage.getItem('tb_bg_custom'); if (custom) applyTbCustom(custom)
-
-  dock.querySelector('#tb-theme-toggle').addEventListener('click', e => {
-    e.stopPropagation()
-    const p = dock.querySelector('#tb-theme-panel')
-    p.hidden = !p.hidden
-  })
-  dock.querySelectorAll('.tb-preset').forEach(btn => btn.addEventListener('click', () => {
-    localStorage.setItem('tb_bg_preset', btn.dataset.bg)
-    document.documentElement.dataset.bg = btn.dataset.bg
-    dock.querySelectorAll('.tb-preset').forEach(b => b.classList.toggle('active', b === btn))
-  }))
-  dock.querySelector('#tb-bg-upload').addEventListener('change', e => {
-    const f = e.target.files?.[0]; if (!f) return
-    const r = new FileReader()
-    r.onload = () => { try { localStorage.setItem('tb_bg_custom', r.result) } catch {} ; applyTbCustom(r.result) }
-    r.readAsDataURL(f)
-  })
-  dock.querySelector('#tb-bg-opacity').addEventListener('input', e => {
-    localStorage.setItem('tb_bg_opacity', e.target.value)
-    document.documentElement.style.setProperty('--tb-custom-opacity', String(Number(e.target.value)/100))
-  })
-  dock.querySelector('#tb-bg-clear').addEventListener('click', () => {
-    localStorage.removeItem('tb_bg_custom'); applyTbCustom(null)
-  })
+      <div id="tb-custom-bg" class="tb-custom-bg"></div>`
+    document.body.appendChild(dock)
+    const preset = localStorage.getItem('tb_bg_preset') || 'aurora'
+    document.documentElement.dataset.bg = preset
+    dock.querySelectorAll('.tb-preset').forEach(b => b.classList.toggle('active', b.dataset.bg === preset))
+    const op = localStorage.getItem('tb_bg_opacity') || '28'
+    document.documentElement.style.setProperty('--tb-custom-opacity', String(Number(op) / 100))
+    dock.querySelector('#tb-bg-opacity').value = op
+    const custom = localStorage.getItem('tb_bg_custom'); if (custom) applyCustom(custom)
+    dock.querySelector('#tb-theme-toggle').onclick = (e) => {
+      e.stopPropagation()
+      const p = dock.querySelector('#tb-theme-panel')
+      p.hidden = !p.hidden
+    }
+    dock.querySelectorAll('.tb-preset').forEach(btn => btn.onclick = () => {
+      localStorage.setItem('tb_bg_preset', btn.dataset.bg)
+      document.documentElement.dataset.bg = btn.dataset.bg
+      dock.querySelectorAll('.tb-preset').forEach(b => b.classList.toggle('active', b === btn))
+    })
+    dock.querySelector('#tb-bg-upload').onchange = (e) => {
+      const f = e.target.files?.[0]; if (!f) return
+      const r = new FileReader()
+      r.onload = () => { try { localStorage.setItem('tb_bg_custom', r.result) } catch {} ; applyCustom(r.result) }
+      r.readAsDataURL(f)
+    }
+    dock.querySelector('#tb-bg-opacity').oninput = (e) => {
+      localStorage.setItem('tb_bg_opacity', e.target.value)
+      document.documentElement.style.setProperty('--tb-custom-opacity', String(Number(e.target.value) / 100))
+    }
+    dock.querySelector('#tb-bg-clear').onclick = () => { localStorage.removeItem('tb_bg_custom'); applyCustom(null) }
+  }
 }
 
-function applyTbCustom(url) {
-  const layer = document.getElementById('tb-custom-bg')
+function applyCustom(url) {
+  const layer = $('tb-custom-bg')
   if (!layer) return
   if (url) { layer.style.backgroundImage = `url(${url})`; layer.classList.add('show') }
   else { layer.style.backgroundImage = ''; layer.classList.remove('show') }
 }
 
-// ── Drag & Drop ────────────────────────────────────────────
+function bootParticles(c) {
+  const ctx = c.getContext('2d')
+  const parts = Array.from({ length: 40 }, () => ({
+    x: Math.random() * innerWidth, y: Math.random() * innerHeight,
+    vx: (Math.random() - .5) * .3, vy: (Math.random() - .5) * .3,
+    r: Math.random() * 2 + .3, a: Math.random() * .3 + .05,
+    c: ['rgba(0,229,199,.9)', 'rgba(168,85,247,.9)', 'rgba(56,189,248,.8)'][Math.floor(Math.random() * 3)]
+  }))
+  const resize = () => { c.width = innerWidth * devicePixelRatio; c.height = innerHeight * devicePixelRatio; ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0) }
+  resize(); addEventListener('resize', resize, { passive: true })
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const loop = () => {
+    ctx.clearRect(0, 0, innerWidth, innerHeight)
+    for (const p of parts) {
+      p.x += p.vx; p.y += p.vy
+      if (p.x < 0) p.x = innerWidth; if (p.x > innerWidth) p.x = 0
+      if (p.y < 0) p.y = innerHeight; if (p.y > innerHeight) p.y = 0
+      ctx.globalAlpha = p.a; ctx.fillStyle = p.c
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.globalAlpha = 1
+    requestAnimationFrame(loop)
+  }
+  loop()
+}
+
 function setupDrop() {
   $dropZone.addEventListener('click', () => $fileInput.click())
   $dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') $fileInput.click() })
-
-  $dropZone.addEventListener('dragover', e => {
-    e.preventDefault()
-    $dropZone.classList.add('drag-over')
-  })
+  $dropZone.addEventListener('dragover', e => { e.preventDefault(); $dropZone.classList.add('drag-over') })
   $dropZone.addEventListener('dragleave', () => $dropZone.classList.remove('drag-over'))
   $dropZone.addEventListener('drop', e => {
-    e.preventDefault()
-    $dropZone.classList.remove('drag-over')
-    const file = e.dataTransfer.files[0]
-    if (file) loadFile(file)
+    e.preventDefault(); $dropZone.classList.remove('drag-over')
+    const file = e.dataTransfer.files[0]; if (file) loadFile(file)
   })
-
-  $fileInput.addEventListener('change', () => {
-    if ($fileInput.files[0]) loadFile($fileInput.files[0])
-  })
-
-  // Also allow drop on body
+  $fileInput.addEventListener('change', () => { if ($fileInput.files[0]) loadFile($fileInput.files[0]) })
   document.addEventListener('dragover', e => e.preventDefault())
   document.addEventListener('drop', e => {
     e.preventDefault()
     const file = e.dataTransfer.files[0]
-    if (file && (file.name.endsWith('.jsonl') || file.name.endsWith('.json') || file.name.endsWith('.ndjson'))) {
-      loadFile(file)
-    }
+    if (file && /\.(jsonl|json|ndjson)$/i.test(file.name)) loadFile(file)
   })
 }
 
 async function loadFile(file) {
-  const text = await file.text()
-  state.filename = file.name
-  loadTraceText(text, file.name)
+  loadTraceText(await file.text(), file.name)
 }
 
-// ── Demo load ──────────────────────────────────────────────
 async function loadDemo() {
   try {
     const [traceRes, summaryRes] = await Promise.all([
@@ -172,47 +181,39 @@ async function loadDemo() {
   }
 }
 
-// ── Core loader ────────────────────────────────────────────
 function loadTraceText(text, filename, summary = null) {
   const raw = parseJSONL(text)
-  if (!raw.length) {
-    showToast('⚠️ No valid events found', 'warn')
-    return
-  }
-
+  if (!raw.length) return showToast('⚠️ No valid events found', 'warn')
   const events = normalizeEvents(raw)
-  const stats  = computeStats(events)
-
-  state.events    = events
-  state.filtered  = events
-  state.stats     = stats
-  state.filename  = filename
+  state.events = events
+  state.filtered = events
+  state.stats = computeStats(events)
+  state.filename = filename
   state.activeTypes = new Set()
   state.selectedEvent = null
   state.summaryMarkdown = summary
   stopPlayback()
   state.playback = { playing: false, idx: 0, timer: null, speed: state.playback?.speed || 1 }
-
   showViewer()
   renderAll()
   showToast(t('toast_loaded') + ` (${events.length} ${t('events')})`)
+  // auto-start subtle playback after short delay
+  setTimeout(() => { if (!state.playback.playing) startPlayback() }, 600)
 }
 
-// ── Show / hide views ──────────────────────────────────────
 function showViewer() {
-  $hero.classList.remove('visible')
-  $hero.classList.add('hidden')
+  $hero.classList.remove('visible'); $hero.classList.add('hidden')
   $viewer.classList.remove('hidden')
+  document.body.classList.add('viewer-on')
 }
-
 function showHero() {
+  stopPlayback()
   $viewer.classList.add('hidden')
-  $hero.classList.remove('hidden')
-  $hero.classList.add('visible')
+  $hero.classList.remove('hidden'); $hero.classList.add('visible')
+  document.body.classList.remove('viewer-on')
   closeDrawer()
 }
 
-// ── Render all ─────────────────────────────────────────────
 function renderAll() {
   updateToolbar()
   renderTypeFilters()
@@ -223,40 +224,104 @@ function renderAll() {
   applyPlaybackHighlight()
 }
 
+function updateToolbar() {
+  const { count, agents, durationMs } = state.stats
+  $filename.textContent = state.filename.split('/').pop()
+  $stats.textContent = `${count} ${t('events')} · ${agents.length} ${t('agents')} · ${formatDuration(durationMs)}`
+}
+
+function renderTypeFilters() {
+  const types = getAllTypeKeys(state.events)
+  $typeFilters.innerHTML = ''
+  for (const type of types) {
+    const col = getTypeColor(type)
+    const chip = document.createElement('button')
+    chip.className = 'chip' + (state.activeTypes.has(type) ? '' : ' active')
+    chip.textContent = type
+    chip.style.borderColor = col.border
+    chip.style.color = '#fff'
+    chip.style.background = col.bg
+    chip.onclick = () => toggleTypeFilter(type)
+    $typeFilters.appendChild(chip)
+  }
+}
+
+function toggleTypeFilter(type) {
+  if (state.activeTypes.has(type)) state.activeTypes.delete(type)
+  else state.activeTypes.add(type)
+  applyFilters()
+}
+
+function applyFilters() {
+  state.filtered = state.activeTypes.size === 0
+    ? state.events
+    : state.events.filter(e => !state.activeTypes.has(e.type))
+  // keep playback index in range
+  state.playback.idx = Math.min(state.playback.idx, Math.max(0, state.filtered.length - 1))
+  renderTypeFilters()
+  ensurePlaybackBar()
+  renderLanes()
+  applyPlaybackHighlight()
+}
+
+function renderSummary() {
+  if (!state.summaryMarkdown) { $summaryBar.classList.add('hidden'); return }
+  const html = state.summaryMarkdown
+    .replace(/^#+\s+(.+)$/gm, '<strong>$1</strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n{2,}/g, ' · ')
+    .replace(/\n/g, ' ')
+  $summaryContent.innerHTML = html.slice(0, 480) + (html.length > 480 ? '…' : '')
+  $summaryBar.classList.remove('hidden')
+  $('btn-close-summary').onclick = () => $summaryBar.classList.add('hidden')
+}
+
 function ensurePlaybackBar() {
-  let bar = document.getElementById('playback-bar')
+  let bar = $('playback-bar')
   if (!bar) {
     bar = document.createElement('div')
     bar.id = 'playback-bar'
-    const host = document.getElementById('toolbar')
-    host?.insertAdjacentElement('afterend', bar)
+    $('toolbar')?.insertAdjacentElement('afterend', bar)
   }
+  const max = Math.max(state.filtered.length - 1, 0)
   bar.innerHTML = `
     <button id="btn-play" class="btn-sm btn-ghost">${state.playback.playing ? '⏸ Pause' : '▶ Play'}</button>
-    <button id="btn-step" class="btn-sm btn-ghost">⏭ Step</button>
-    <button id="btn-replay" class="btn-sm btn-ghost">⟲ Restart</button>
+    <button id="btn-step" class="btn-sm btn-ghost">⏭</button>
+    <button id="btn-replay" class="btn-sm btn-ghost">⟲</button>
     <label class="speed-label">Speed
       <select id="play-speed">
         <option value="0.5">0.5×</option>
-        <option value="1" selected>1×</option>
+        <option value="1">1×</option>
         <option value="2">2×</option>
         <option value="4">4×</option>
       </select>
     </label>
-    <input id="play-scrub" type="range" min="0" max="${Math.max(state.filtered.length - 1, 0)}" value="${state.playback.idx}" />
-    <span id="play-pos">${Math.min(state.playback.idx + 1, state.filtered.length)} / ${state.filtered.length}</span>
+    <div class="scrub-wrap">
+      <div class="scrub-fill" id="scrub-fill"></div>
+      <input id="play-scrub" type="range" min="0" max="${max}" value="${state.playback.idx}" />
+    </div>
+    <span id="play-pos">${state.filtered.length ? state.playback.idx + 1 : 0}/${state.filtered.length}</span>
   `
   const speed = bar.querySelector('#play-speed')
   if (speed) speed.value = String(state.playback.speed)
-  bar.querySelector('#btn-play')?.addEventListener('click', togglePlayback)
-  bar.querySelector('#btn-step')?.addEventListener('click', () => { stopPlayback(); stepPlayback(1) })
-  bar.querySelector('#btn-replay')?.addEventListener('click', () => { stopPlayback(); state.playback.idx = 0; applyPlaybackHighlight(true) })
-  bar.querySelector('#play-speed')?.addEventListener('change', e => { state.playback.speed = Number(e.target.value) || 1 })
-  bar.querySelector('#play-scrub')?.addEventListener('input', e => {
+  bar.querySelector('#btn-play').onclick = togglePlayback
+  bar.querySelector('#btn-step').onclick = () => { stopPlayback(); stepPlayback(1) }
+  bar.querySelector('#btn-replay').onclick = () => { stopPlayback(); state.playback.idx = 0; applyPlaybackHighlight(true); ensurePlaybackBar() }
+  bar.querySelector('#play-speed').onchange = e => { state.playback.speed = Number(e.target.value) || 1 }
+  bar.querySelector('#play-scrub').oninput = e => {
     stopPlayback()
     state.playback.idx = Number(e.target.value) || 0
     applyPlaybackHighlight(true)
-  })
+    updateScrubFill()
+  }
+  updateScrubFill()
+}
+
+function updateScrubFill() {
+  const max = Math.max(state.filtered.length - 1, 1)
+  const pct = (state.playback.idx / max) * 100
+  const fill = $('scrub-fill')
+  if (fill) fill.style.width = pct + '%'
 }
 
 function togglePlayback() {
@@ -275,10 +340,14 @@ function startPlayback() {
     }
     state.playback.idx += 1
     applyPlaybackHighlight(true)
-    const base = 700
-    state.playback.timer = setTimeout(tick, base / (state.playback.speed || 1))
+    updateScrubFill()
+    const pos = $('play-pos')
+    if (pos) pos.textContent = `${state.playback.idx + 1}/${state.filtered.length}`
+    const scrub = $('play-scrub')
+    if (scrub) scrub.value = String(state.playback.idx)
+    state.playback.timer = setTimeout(tick, 650 / (state.playback.speed || 1))
   }
-  state.playback.timer = setTimeout(tick, 200)
+  state.playback.timer = setTimeout(tick, 180)
 }
 
 function stopPlayback() {
@@ -295,178 +364,140 @@ function stepPlayback(delta) {
 
 function applyPlaybackHighlight(open = false) {
   const ev = state.filtered[state.playback.idx]
+  // playhead
+  const head = $('playhead')
+  if (head && ev && state.stats?.durationMs && ev.ts) {
+    const ratio = (new Date(ev.ts).getTime() - state.stats.startMs) / state.stats.durationMs
+    head.style.left = `calc(130px + ${Math.max(0, Math.min(1, ratio)) * 100}% * 1)` // fallback below
+  }
   document.querySelectorAll('.event-block').forEach(b => {
     const idx = Number(b.dataset.idx)
-    b.classList.toggle('is-current', ev && idx === ev._idx)
-    b.classList.toggle('is-past', ev && idx < ev._idx)
+    b.classList.toggle('is-current', !!(ev && idx === ev._idx))
+    b.classList.toggle('is-past', !!(ev && idx <= ev._idx))
+    b.classList.toggle('is-future', !!(ev && idx > ev._idx))
   })
-  const pos = document.getElementById('play-pos')
-  if (pos) pos.textContent = `${Math.min(state.playback.idx + 1, state.filtered.length)} / ${state.filtered.length}`
-  const scrub = document.getElementById('play-scrub')
-  if (scrub) scrub.value = String(state.playback.idx)
-  if (open && ev) {
-    document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
-    document.querySelector(`.event-block[data-idx="${ev._idx}"]`)?.classList.add('selected')
-    openDrawer(ev)
+  // move playhead precisely using current block
+  if (ev) {
+    const block = document.querySelector(`.event-block[data-idx="${ev._idx}"]`)
+    const laneTrack = block?.parentElement
+    const ph = $('playhead')
+    if (block && laneTrack && ph) {
+      const left = block.offsetLeft + 130
+      ph.style.transform = `translateX(${left}px)`
+      ph.classList.add('on')
+    }
+    if (open) {
+      document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
+      block?.classList.add('selected')
+      openDrawer(ev)
+      block?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
   }
+  updateScrubFill()
 }
 
-function updateToolbar() {
-  const { count, agents, durationMs } = state.stats
-  $filename.textContent = state.filename.split('/').pop()
-  $stats.textContent = `${count} ${t('events')} · ${agents.length} ${t('agents')} · ${formatDuration(durationMs)}`
-}
-
-function renderTypeFilters() {
-  const types = getAllTypeKeys(state.events)
-  $typeFilters.innerHTML = ''
-  for (const type of types) {
-    const col = getTypeColor(type)
-    const chip = document.createElement('button')
-    chip.className = 'chip' + (state.activeTypes.has(type) ? '' : ' active')
-    chip.textContent = type
-    chip.style.borderColor = col.border
-    chip.style.color = state.activeTypes.has(type) ? col.border : '#fff'
-    chip.style.background = state.activeTypes.has(type) ? col.bg : col.bg
-    chip.addEventListener('click', () => toggleTypeFilter(type))
-    $typeFilters.appendChild(chip)
-  }
-}
-
-function toggleTypeFilter(type) {
-  if (state.activeTypes.has(type)) {
-    state.activeTypes.delete(type)
-  } else {
-    state.activeTypes.add(type)
-  }
-  applyFilters()
-}
-
-function applyFilters() {
-  if (state.activeTypes.size === 0) {
-    state.filtered = state.events
-  } else {
-    state.filtered = state.events.filter(e => !state.activeTypes.has(e.type))
-  }
-  renderTypeFilters()
-  renderLanes()
-}
-
-// ── Summary bar ────────────────────────────────────────────
-function renderSummary() {
-  if (!state.summaryMarkdown) {
-    $summaryBar.classList.add('hidden')
-    return
-  }
-  // Convert basic markdown to HTML (just headings, bold, links)
-  const html = state.summaryMarkdown
-    .replace(/^#+\s+(.+)$/gm, '<strong>$1</strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n{2,}/g, ' &nbsp;·&nbsp; ')
-    .replace(/\n/g, ' ')
-    .slice(0, 400) + '...'
-  $summaryContent.innerHTML = html
-  $summaryBar.classList.remove('hidden')
-  document.getElementById('btn-close-summary').addEventListener('click', () => {
-    $summaryBar.classList.add('hidden')
-  }, { once: true })
-}
-
-// ── Swimlanes ──────────────────────────────────────────────
 function renderLanes() {
   $lanes.innerHTML = ''
   $ruler.innerHTML = ''
-
   const events = state.filtered
   if (!events.length) {
     $lanes.innerHTML = `<p class="scroll-hint">${t('no_trace')}</p>`
     return
   }
-
   const groupMap = groupByAgent(events)
-  const agents   = [...groupMap.keys()]
-
-  // Compute timeline scale
+  const agents = [...groupMap.keys()]
   const containerW = $lanes.parentElement.clientWidth - 130 - 40
-  const trackW = Math.max(containerW, 400)
+  const trackW = Math.max(containerW, 560)
+
+  // global playhead layer
+  let stage = $('lane-stage')
+  if (!stage) {
+    stage = document.createElement('div')
+    stage.id = 'lane-stage'
+    $lanes.parentElement.insertBefore(stage, $lanes)
+  }
+  stage.innerHTML = `<div id="playhead" class="playhead"><i></i></div>`
+  // move lanes into stage if needed
+  if ($lanes.parentElement !== stage) stage.appendChild($lanes)
 
   renderRuler(state.stats, trackW)
 
   for (const agent of agents) {
     const agentEvents = groupMap.get(agent)
-    const lane = createLane(agent, agentEvents, trackW)
-    $lanes.appendChild(lane)
+    $lanes.appendChild(createLane(agent, agentEvents, trackW))
   }
 }
 
 function renderRuler(stats, trackW) {
-  const rulerOrigin = document.createElement('div')
-  rulerOrigin.className = 'ruler-origin'
-  $ruler.appendChild(rulerOrigin)
-
-  const rulerTrack = document.createElement('div')
-  rulerTrack.style.flex = '1'
-  rulerTrack.style.position = 'relative'
-  rulerTrack.style.height = '20px'
-
-  // Add tick marks
-  const ticks = 6
+  const origin = document.createElement('div')
+  origin.className = 'ruler-origin'
+  $ruler.appendChild(origin)
+  const track = document.createElement('div')
+  track.className = 'ruler-track'
+  track.style.width = trackW + 'px'
+  const ticks = 8
   for (let i = 0; i <= ticks; i++) {
     const pct = i / ticks
     const label = document.createElement('span')
     label.className = 'ruler-label'
-    label.style.position = 'absolute'
     label.style.left = (pct * 100) + '%'
-    label.style.transform = 'translateX(-50%)'
     const ms = stats.startMs + pct * stats.durationMs
-    label.textContent = stats.durationMs
-      ? formatTimestamp(new Date(ms).toISOString())
-      : '+'  + (pct * stats.durationMs / 1000).toFixed(0) + 's'
-    rulerTrack.appendChild(label)
+    label.textContent = stats.durationMs ? formatTimestamp(new Date(ms).toISOString()) : `+${(pct * stats.durationMs / 1000).toFixed(0)}s`
+    track.appendChild(label)
   }
-  $ruler.appendChild(rulerTrack)
+  $ruler.appendChild(track)
 }
 
 function createLane(agent, events, trackW) {
   const col = getAgentColor(agent)
   const lane = document.createElement('div')
   lane.className = 'lane'
+  lane.style.setProperty('--agent', col.bg)
 
   const label = document.createElement('div')
   label.className = 'lane-label'
-  label.textContent = col.label || agent
+  label.innerHTML = `<span class="dot" style="background:${col.bg}"></span>${col.label || agent}`
   label.style.color = col.bg
 
   const track = document.createElement('div')
   track.className = 'lane-track'
   track.style.width = trackW + 'px'
 
-  // Render phase phase dividers
-  const phases = [...new Set(events.filter(e => e.phase).map(e => e.phase))]
-  for (const phase of phases) {
-    const phaseEvents = events.filter(e => e.phase === phase)
-    if (!phaseEvents.length) continue
-    const startTs = phaseEvents.map(e => e.ts ? new Date(e.ts).getTime() : null).filter(Boolean)
-    if (!startTs.length) continue
-    const minTs = Math.min(...startTs)
-    const pct = state.stats.durationMs
-      ? (minTs - state.stats.startMs) / state.stats.durationMs
-      : 0
-    const div = document.createElement('div')
-    div.className = 'phase-divider'
-    div.style.left = (pct * trackW) + 'px'
-    const lbl = document.createElement('span')
-    lbl.className = 'phase-label'
-    lbl.textContent = phase
-    div.appendChild(lbl)
-    track.appendChild(div)
-  }
+  // connector path
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.classList.add('lane-links')
+  svg.setAttribute('width', String(trackW))
+  svg.setAttribute('height', '64')
+  track.appendChild(svg)
 
-  // Render event blocks
+  const blocks = []
   for (const ev of events) {
     const block = createEventBlock(ev, trackW, events)
     track.appendChild(block)
+    blocks.push({ ev, block })
   }
+
+  // draw links after layout
+  requestAnimationFrame(() => {
+    let d = ''
+    for (let i = 0; i < blocks.length - 1; i++) {
+      const a = blocks[i].block
+      const b = blocks[i + 1].block
+      const x1 = a.offsetLeft + a.offsetWidth
+      const x2 = b.offsetLeft
+      const y = 32
+      if (x2 > x1) d += `M ${x1} ${y} C ${x1 + 20} ${y}, ${x2 - 20} ${y}, ${x2} ${y} `
+    }
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', d)
+    path.setAttribute('stroke', col.bg)
+    path.setAttribute('stroke-opacity', '0.35')
+    path.setAttribute('fill', 'none')
+    path.setAttribute('stroke-width', '2')
+    path.setAttribute('stroke-dasharray', '4 6')
+    path.classList.add('link-path')
+    svg.appendChild(path)
+  })
 
   lane.appendChild(label)
   lane.appendChild(track)
@@ -482,9 +513,8 @@ function createEventBlock(ev, trackW, agentEvents = []) {
   block.style.borderColor = col.border
   if (ev.type === 'error') block.classList.add('is-error')
 
-  // Position + width from timestamp span to next event on lane
-  let left = 4
-  let width = Math.max(14, Math.min(72, (trackW / Math.max(state.events.length, 1)) * 1.1))
+  let left = 8
+  let width = Math.max(56, Math.min(120, trackW / Math.max(state.events.length, 1) * 1.4))
   if (ev.ts && state.stats.durationMs) {
     const tsMs = new Date(ev.ts).getTime()
     const ratio = (tsMs - state.stats.startMs) / state.stats.durationMs
@@ -493,222 +523,136 @@ function createEventBlock(ev, trackW, agentEvents = []) {
     if (next) {
       const nMs = new Date(next.ts).getTime()
       const wRatio = Math.max(0, (nMs - tsMs) / state.stats.durationMs)
-      width = Math.max(16, Math.min(140, Math.round(wRatio * trackW * 0.92)))
+      width = Math.max(48, Math.min(160, Math.round(wRatio * trackW * 0.85)))
     }
   }
   block.style.left = left + 'px'
   block.style.width = width + 'px'
 
-  const lbl = document.createElement('span')
-  lbl.className = 'event-block-label'
-  lbl.textContent = ev.type === 'phase_start' || ev.type === 'phase_end'
-    ? (ev.phase || ev.type)
-    : ev.type
-  block.appendChild(lbl)
+  const type = document.createElement('span')
+  type.className = 'event-block-label'
+  type.textContent = (ev.type === 'phase_start' || ev.type === 'phase_end') ? (ev.phase || ev.type) : ev.type
+  block.appendChild(type)
 
   if (ev.message) {
     const msg = document.createElement('span')
     msg.className = 'event-block-msg'
-    msg.textContent = String(ev.message).slice(0, 48)
+    msg.textContent = String(ev.message).slice(0, 64)
     block.appendChild(msg)
   }
 
   block.title = `[${ev.type}] ${ev.message || ''}`
-
   block.addEventListener('click', (e) => {
     e.stopPropagation()
+    stopPlayback()
+    const i = state.filtered.findIndex(x => x._idx === ev._idx)
+    if (i >= 0) state.playback.idx = i
     document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
     block.classList.add('selected')
+    applyPlaybackHighlight(false)
     openDrawer(ev)
+    ensurePlaybackBar()
   })
-
   return block
 }
 
-// ── Legend ─────────────────────────────────────────────────
 function renderLegend() {
   $legend.innerHTML = ''
-  const types = getAllTypeKeys(state.events)
-  for (const type of types) {
+  for (const type of getAllTypeKeys(state.events)) {
     const col = getTypeColor(type)
     const item = document.createElement('div')
     item.className = 'legend-item'
-    const dot = document.createElement('div')
-    dot.className = 'legend-dot'
-    dot.style.background = col.border
-    const lbl = document.createElement('span')
-    lbl.textContent = type
-    item.appendChild(dot)
-    item.appendChild(lbl)
+    item.innerHTML = `<div class="legend-dot" style="background:${col.border}"></div><span>${type}</span>`
     $legend.appendChild(item)
   }
-
-  // Agent legend
-  const agents = getAllAgentKeys(state.events)
-  for (const agent of agents) {
+  for (const agent of getAllAgentKeys(state.events)) {
     const col = getAgentColor(agent)
     const item = document.createElement('div')
     item.className = 'legend-item'
-    const dot = document.createElement('div')
-    dot.className = 'legend-dot'
-    dot.style.background = col.bg
-    dot.style.borderRadius = '50%'
-    const lbl = document.createElement('span')
-    lbl.textContent = col.label || agent
-    item.appendChild(dot)
-    item.appendChild(lbl)
+    item.innerHTML = `<div class="legend-dot" style="background:${col.bg};border-radius:50%"></div><span>${col.label || agent}</span>`
     $legend.appendChild(item)
   }
 }
 
-// ── Drawer ─────────────────────────────────────────────────
 function openDrawer(ev) {
   state.selectedEvent = ev
   const col = getTypeColor(ev.type)
-
-  const badge = document.getElementById('drawer-event-type')
+  const badge = $('drawer-event-type')
   badge.textContent = ev.type
   badge.style.background = col.bg
   badge.style.borderColor = col.border
   badge.style.color = col.border
-
-  document.getElementById('drawer-agent').textContent = ev.agent || '—'
-  document.getElementById('drawer-phase').textContent = ev.phase || '—'
-  document.getElementById('drawer-time').textContent = formatTimestamp(ev.ts)
+  $('drawer-agent').textContent = ev.agent || '—'
+  $('drawer-phase').textContent = ev.phase || '—'
+  $('drawer-time').textContent = formatTimestamp(ev.ts)
 
   const agentEvents = state.events.filter(e => e.agent === ev.agent && e.phase === ev.phase)
-  const startTs = Math.min(...agentEvents.map(e => e.ts ? new Date(e.ts).getTime() : Infinity).filter(isFinite))
-  const endTs   = Math.max(...agentEvents.map(e => e.ts ? new Date(e.ts).getTime() : -Infinity).filter(isFinite))
-  const durMs   = isFinite(endTs - startTs) ? endTs - startTs : null
-  const $durRow = document.getElementById('drawer-duration-row')
-  if (durMs !== null && durMs > 0) {
-    document.getElementById('drawer-duration').textContent = formatDuration(durMs)
+  const times = agentEvents.map(e => e.ts ? new Date(e.ts).getTime() : NaN).filter(Number.isFinite)
+  const $durRow = $('drawer-duration-row')
+  if (times.length >= 2) {
+    $('drawer-duration').textContent = formatDuration(Math.max(...times) - Math.min(...times))
     $durRow.classList.remove('hidden')
-  } else {
-    $durRow.classList.add('hidden')
-  }
+  } else $durRow.classList.add('hidden')
 
-  document.getElementById('drawer-message').textContent = ev.message || '—'
-  document.getElementById('drawer-raw').textContent = JSON.stringify(ev._raw, null, 2)
-
-  $drawer.classList.remove('hidden')
-  $drawer.classList.add('open')
-  $backdrop.classList.remove('hidden')
-  $backdrop.classList.add('open')
+  $('drawer-message').textContent = ev.message || '—'
+  $('drawer-raw').textContent = JSON.stringify(ev._raw, null, 2)
+  $drawer.classList.remove('hidden'); $drawer.classList.add('open')
+  $backdrop.classList.remove('hidden'); $backdrop.classList.add('open')
 }
 
 function closeDrawer() {
-  $drawer.classList.remove('open')
-  $backdrop.classList.remove('open')
-  setTimeout(() => {
-    $drawer.classList.add('hidden')
-    $backdrop.classList.add('hidden')
-  }, 260)
+  $drawer.classList.remove('open'); $backdrop.classList.remove('open')
+  setTimeout(() => { $drawer.classList.add('hidden'); $backdrop.classList.add('hidden') }, 260)
   document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
   state.selectedEvent = null
 }
 
-// ── Share ──────────────────────────────────────────────────
 function shareTrace() {
   if (!state.events.length) return
-
-  if (state.events.length > 50) {
-    showToast(t('toast_share_small'))
-    return
-  }
-
+  if (state.events.length > 50) return showToast(t('toast_share_small'))
   const encoded = encodeTraceURL(state.events)
   const url = location.origin + location.pathname + '#trace=' + encoded
-
-  // Show popup
-  const existing = document.querySelector('.share-popup')
-  if (existing) existing.remove()
-
+  document.querySelector('.share-popup')?.remove()
   const popup = document.createElement('div')
   popup.className = 'share-popup'
   popup.innerHTML = `
     <div class="share-popup-title">${t('share_title')}</div>
     <p style="font-size:11px;color:var(--text-dim)">${t('share_note')}</p>
-    <input readonly value="${url}" id="share-url-input" />
-    <button class="btn-primary" style="font-size:12px;padding:6px 16px" id="btn-copy-url">Copy</button>
-  `
+    <input readonly value="${url}" id="share-url-input"/>
+    <button class="btn-primary" style="font-size:12px;padding:6px 16px" id="btn-copy-url">Copy</button>`
   document.body.appendChild(popup)
-
-  document.getElementById('share-url-input').select()
-  document.getElementById('btn-copy-url').addEventListener('click', () => {
-    navigator.clipboard.writeText(url).then(() => {
-      showToast(t('toast_copied'))
-      popup.remove()
-    })
-  })
-
-  // Close on outside click
-  setTimeout(() => {
-    document.addEventListener('click', () => popup.remove(), { once: true })
-  }, 100)
+  $('share-url-input').select()
+  $('btn-copy-url').onclick = () => navigator.clipboard.writeText(url).then(() => { showToast(t('toast_copied')); popup.remove() })
+  setTimeout(() => document.addEventListener('click', () => popup.remove(), { once: true }), 100)
 }
 
-// ── Export snapshot ────────────────────────────────────────
 function exportSnapshot() {
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<title>Traceboard Snapshot — ${state.filename}</title>
-<style>
-body{font-family:monospace;background:#060d1a;color:#e2e8f0;padding:24px}
-h1{color:#00e5c7;margin-bottom:8px}
-.meta{color:#64748b;font-size:12px;margin-bottom:16px}
-table{border-collapse:collapse;width:100%;font-size:12px}
-th{background:#112240;color:#94a3b8;padding:6px 10px;text-align:left;border:1px solid #1e3a5f}
-td{padding:5px 10px;border:1px solid #1e3a5f;vertical-align:top}
-.t-phase_start{color:#00e5c7}
-.t-phase_end{color:#007a6e}
-.t-agent_call{color:#a855f7}
-.t-agent_result{color:#38bdf8}
-.t-error{color:#f43f5e}
-</style>
-</head>
-<body>
-<h1>🌊 Traceboard Snapshot</h1>
-<div class="meta">File: ${state.filename} · ${state.events.length} events · Generated: ${new Date().toISOString()}</div>
-<table>
-<thead><tr><th>Time</th><th>Type</th><th>Agent</th><th>Phase</th><th>Message</th></tr></thead>
-<tbody>
-${state.filtered.map(ev => `<tr>
-  <td>${formatTimestamp(ev.ts)}</td>
-  <td class="t-${ev.type}">${ev.type}</td>
-  <td>${ev.agent}</td>
-  <td>${ev.phase || ''}</td>
-  <td>${ev.message || ''}</td>
-</tr>`).join('')}
-</tbody>
-</table>
-</body>
-</html>`
-
+  const html = `<!doctype html><meta charset=utf-8><title>Traceboard Snapshot</title>
+  <body style="font-family:monospace;background:#060d1a;color:#e2e8f0;padding:24px">
+  <h1 style="color:#00e5c7">Traceboard Snapshot</h1>
+  <div style="color:#64748b;margin-bottom:16px">${state.filename} · ${state.events.length} events · ${new Date().toISOString()}</div>
+  <table style="border-collapse:collapse;width:100%;font-size:12px">
+  <tr style="background:#112240"><th>Time</th><th>Type</th><th>Agent</th><th>Phase</th><th>Message</th></tr>
+  ${state.filtered.map(ev => `<tr>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${formatTimestamp(ev.ts)}</td>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.type}</td>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.agent}</td>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.phase || ''}</td>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${(ev.message || '').replace(/</g, '<')}</td>
+  </tr>`).join('')}
+  </table>`
   const blob = new Blob([html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'traceboard-snapshot.html'
-  a.click()
-  URL.revokeObjectURL(url)
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'traceboard-snapshot.html'; a.click()
   showToast(t('toast_export'))
 }
 
-// ── URL hash share ─────────────────────────────────────────
 function checkURLHash() {
   const hash = location.hash
   if (!hash.startsWith('#trace=')) return
-  const encoded = hash.slice('#trace='.length)
-  const raw = decodeTraceURL(encoded)
-  if (raw && raw.length) {
-    loadTraceText(raw.map(e => JSON.stringify(e)).join('\n'), 'shared-trace.jsonl')
-  }
+  const raw = decodeTraceURL(hash.slice('#trace='.length))
+  if (raw?.length) loadTraceText(raw.map(e => JSON.stringify(e)).join('\n'), 'shared-trace.jsonl')
 }
 
-// ── Toast ──────────────────────────────────────────────────
 let toastTimer
 function showToast(msg, type = 'info') {
   $toast.textContent = msg
@@ -718,36 +662,27 @@ function showToast(msg, type = 'info') {
   toastTimer = setTimeout(() => $toast.classList.add('hidden'), 3200)
 }
 
-// ── Button wiring ──────────────────────────────────────────
 function setupButtons() {
-  $btnDemo.addEventListener('click', loadDemo)
-  $btnLang.addEventListener('click', () => {
-    const next = currentLang === 'en' ? 'zh' : 'en'
-    setLang(next)
-    if (state.stats) updateToolbar()
-  })
-  $btnShare.addEventListener('click', shareTrace)
-  $btnExport.addEventListener('click', exportSnapshot)
-  $btnBack.addEventListener('click', showHero)
-  $btnReset.addEventListener('click', () => {
-    state.activeTypes.clear()
-    applyFilters()
-  })
-  document.getElementById('btn-close-drawer').addEventListener('click', closeDrawer)
-  $backdrop.addEventListener('click', closeDrawer)
-
-  // Keyboard escape
+  $btnDemo.onclick = loadDemo
+  $btnLang.onclick = () => { setLang(currentLang === 'en' ? 'zh' : 'en'); if (state.stats) updateToolbar() }
+  $btnShare.onclick = shareTrace
+  $btnExport.onclick = exportSnapshot
+  $btnBack.onclick = showHero
+  $btnReset.onclick = () => { state.activeTypes.clear(); applyFilters() }
+  $('btn-close-drawer').onclick = closeDrawer
+  $backdrop.onclick = closeDrawer
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeDrawer()
+    if (!state.events.length) return
+    if (e.key === ' ') { e.preventDefault(); togglePlayback(); ensurePlaybackBar() }
+    if (e.key === 'ArrowRight') { stopPlayback(); stepPlayback(1) }
+    if (e.key === 'ArrowLeft') { stopPlayback(); stepPlayback(-1) }
   })
-
-  // Re-render lanes on resize
   let resizeTimer
-  window.addEventListener('resize', () => {
+  addEventListener('resize', () => {
     clearTimeout(resizeTimer)
     resizeTimer = setTimeout(() => { if (state.events.length) renderLanes() }, 200)
   })
 }
 
-// ── Start ──────────────────────────────────────────────────
 init()

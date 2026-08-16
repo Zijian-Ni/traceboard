@@ -1,6 +1,6 @@
 {
   "name": "traceboard",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shareable multi-agent orchestration trace player — static site, zero backend",
   "private": false,
   "license": "MIT",
