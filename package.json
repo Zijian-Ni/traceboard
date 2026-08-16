@@ -1,6 +1,6 @@
 {
   "name": "traceboard",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Shareable multi-agent orchestration trace player — static site, zero backend",
   "private": false,
   "type": "module",
