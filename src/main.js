@@ -19,6 +19,8 @@ let state = {
   selectedEvent: null,
   filename: 'trace.jsonl',
   summaryMarkdown: null,
+  playback: { playing: false, idx: 0, timer: null, speed: 1 },
+  agentFilter: new Set(),
 }
 
 // ── DOM refs ───────────────────────────────────────────────
@@ -49,7 +51,71 @@ async function init() {
   setLang('en')
   setupDrop()
   setupButtons()
+  ensureThemeDock()
   checkURLHash()
+}
+
+function ensureThemeDock() {
+  if (document.getElementById('tb-theme-dock')) return
+  const dock = document.createElement('div')
+  dock.id = 'tb-theme-dock'
+  dock.innerHTML = `
+    <button id="tb-theme-toggle" class="tb-theme-toggle" title="Background">🎨</button>
+    <div id="tb-theme-panel" class="tb-theme-panel" hidden>
+      <div class="tb-theme-title">Background</div>
+      <div class="tb-theme-presets">
+        <button data-bg="aurora" class="tb-preset active">Aurora</button>
+        <button data-bg="midnight" class="tb-preset">Midnight</button>
+        <button data-bg="nebula" class="tb-preset">Nebula</button>
+        <button data-bg="ember" class="tb-preset">Ember</button>
+      </div>
+      <label class="tb-theme-upload">Custom image / GIF
+        <input id="tb-bg-upload" type="file" accept="image/*,.gif" hidden />
+      </label>
+      <input id="tb-bg-opacity" type="range" min="10" max="85" value="30" />
+      <button id="tb-bg-clear" class="btn-ghost btn-sm">Clear custom</button>
+    </div>
+    <div id="tb-custom-bg" class="tb-custom-bg" aria-hidden="true"></div>
+  `
+  document.body.appendChild(dock)
+  const preset = localStorage.getItem('tb_bg_preset') || 'aurora'
+  document.documentElement.dataset.bg = preset
+  dock.querySelectorAll('.tb-preset').forEach(b => b.classList.toggle('active', b.dataset.bg === preset))
+  const op = localStorage.getItem('tb_bg_opacity') || '30'
+  document.documentElement.style.setProperty('--tb-custom-opacity', String(Number(op)/100))
+  const opEl = dock.querySelector('#tb-bg-opacity'); if (opEl) opEl.value = op
+  const custom = localStorage.getItem('tb_bg_custom'); if (custom) applyTbCustom(custom)
+
+  dock.querySelector('#tb-theme-toggle').addEventListener('click', e => {
+    e.stopPropagation()
+    const p = dock.querySelector('#tb-theme-panel')
+    p.hidden = !p.hidden
+  })
+  dock.querySelectorAll('.tb-preset').forEach(btn => btn.addEventListener('click', () => {
+    localStorage.setItem('tb_bg_preset', btn.dataset.bg)
+    document.documentElement.dataset.bg = btn.dataset.bg
+    dock.querySelectorAll('.tb-preset').forEach(b => b.classList.toggle('active', b === btn))
+  }))
+  dock.querySelector('#tb-bg-upload').addEventListener('change', e => {
+    const f = e.target.files?.[0]; if (!f) return
+    const r = new FileReader()
+    r.onload = () => { try { localStorage.setItem('tb_bg_custom', r.result) } catch {} ; applyTbCustom(r.result) }
+    r.readAsDataURL(f)
+  })
+  dock.querySelector('#tb-bg-opacity').addEventListener('input', e => {
+    localStorage.setItem('tb_bg_opacity', e.target.value)
+    document.documentElement.style.setProperty('--tb-custom-opacity', String(Number(e.target.value)/100))
+  })
+  dock.querySelector('#tb-bg-clear').addEventListener('click', () => {
+    localStorage.removeItem('tb_bg_custom'); applyTbCustom(null)
+  })
+}
+
+function applyTbCustom(url) {
+  const layer = document.getElementById('tb-custom-bg')
+  if (!layer) return
+  if (url) { layer.style.backgroundImage = `url(${url})`; layer.classList.add('show') }
+  else { layer.style.backgroundImage = ''; layer.classList.remove('show') }
 }
 
 // ── Drag & Drop ────────────────────────────────────────────
@@ -124,6 +190,8 @@ function loadTraceText(text, filename, summary = null) {
   state.activeTypes = new Set()
   state.selectedEvent = null
   state.summaryMarkdown = summary
+  stopPlayback()
+  state.playback = { playing: false, idx: 0, timer: null, speed: state.playback?.speed || 1 }
 
   showViewer()
   renderAll()
@@ -149,8 +217,98 @@ function renderAll() {
   updateToolbar()
   renderTypeFilters()
   renderSummary()
+  ensurePlaybackBar()
   renderLanes()
   renderLegend()
+  applyPlaybackHighlight()
+}
+
+function ensurePlaybackBar() {
+  let bar = document.getElementById('playback-bar')
+  if (!bar) {
+    bar = document.createElement('div')
+    bar.id = 'playback-bar'
+    const host = document.getElementById('toolbar')
+    host?.insertAdjacentElement('afterend', bar)
+  }
+  bar.innerHTML = `
+    <button id="btn-play" class="btn-sm btn-ghost">${state.playback.playing ? '⏸ Pause' : '▶ Play'}</button>
+    <button id="btn-step" class="btn-sm btn-ghost">⏭ Step</button>
+    <button id="btn-replay" class="btn-sm btn-ghost">⟲ Restart</button>
+    <label class="speed-label">Speed
+      <select id="play-speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </label>
+    <input id="play-scrub" type="range" min="0" max="${Math.max(state.filtered.length - 1, 0)}" value="${state.playback.idx}" />
+    <span id="play-pos">${Math.min(state.playback.idx + 1, state.filtered.length)} / ${state.filtered.length}</span>
+  `
+  const speed = bar.querySelector('#play-speed')
+  if (speed) speed.value = String(state.playback.speed)
+  bar.querySelector('#btn-play')?.addEventListener('click', togglePlayback)
+  bar.querySelector('#btn-step')?.addEventListener('click', () => { stopPlayback(); stepPlayback(1) })
+  bar.querySelector('#btn-replay')?.addEventListener('click', () => { stopPlayback(); state.playback.idx = 0; applyPlaybackHighlight(true) })
+  bar.querySelector('#play-speed')?.addEventListener('change', e => { state.playback.speed = Number(e.target.value) || 1 })
+  bar.querySelector('#play-scrub')?.addEventListener('input', e => {
+    stopPlayback()
+    state.playback.idx = Number(e.target.value) || 0
+    applyPlaybackHighlight(true)
+  })
+}
+
+function togglePlayback() {
+  if (state.playback.playing) stopPlayback()
+  else startPlayback()
+  ensurePlaybackBar()
+}
+
+function startPlayback() {
+  if (!state.filtered.length) return
+  state.playback.playing = true
+  const tick = () => {
+    if (!state.playback.playing) return
+    if (state.playback.idx >= state.filtered.length - 1) {
+      stopPlayback(); ensurePlaybackBar(); return
+    }
+    state.playback.idx += 1
+    applyPlaybackHighlight(true)
+    const base = 700
+    state.playback.timer = setTimeout(tick, base / (state.playback.speed || 1))
+  }
+  state.playback.timer = setTimeout(tick, 200)
+}
+
+function stopPlayback() {
+  state.playback.playing = false
+  if (state.playback.timer) clearTimeout(state.playback.timer)
+  state.playback.timer = null
+}
+
+function stepPlayback(delta) {
+  state.playback.idx = Math.max(0, Math.min(state.filtered.length - 1, state.playback.idx + delta))
+  applyPlaybackHighlight(true)
+  ensurePlaybackBar()
+}
+
+function applyPlaybackHighlight(open = false) {
+  const ev = state.filtered[state.playback.idx]
+  document.querySelectorAll('.event-block').forEach(b => {
+    const idx = Number(b.dataset.idx)
+    b.classList.toggle('is-current', ev && idx === ev._idx)
+    b.classList.toggle('is-past', ev && idx < ev._idx)
+  })
+  const pos = document.getElementById('play-pos')
+  if (pos) pos.textContent = `${Math.min(state.playback.idx + 1, state.filtered.length)} / ${state.filtered.length}`
+  const scrub = document.getElementById('play-scrub')
+  if (scrub) scrub.value = String(state.playback.idx)
+  if (open && ev) {
+    document.querySelectorAll('.event-block.selected').forEach(b => b.classList.remove('selected'))
+    document.querySelector(`.event-block[data-idx="${ev._idx}"]`)?.classList.add('selected')
+    openDrawer(ev)
+  }
 }
 
 function updateToolbar() {
@@ -306,7 +464,7 @@ function createLane(agent, events, trackW) {
 
   // Render event blocks
   for (const ev of events) {
-    const block = createEventBlock(ev, trackW)
+    const block = createEventBlock(ev, trackW, events)
     track.appendChild(block)
   }
 
@@ -315,24 +473,32 @@ function createLane(agent, events, trackW) {
   return lane
 }
 
-function createEventBlock(ev, trackW) {
+function createEventBlock(ev, trackW, agentEvents = []) {
   const col = getTypeColor(ev.type)
   const block = document.createElement('div')
   block.className = 'event-block'
+  block.dataset.idx = String(ev._idx)
   block.style.background = col.bg
   block.style.borderColor = col.border
+  if (ev.type === 'error') block.classList.add('is-error')
 
-  // Position
+  // Position + width from timestamp span to next event on lane
   let left = 4
+  let width = Math.max(14, Math.min(72, (trackW / Math.max(state.events.length, 1)) * 1.1))
   if (ev.ts && state.stats.durationMs) {
     const tsMs = new Date(ev.ts).getTime()
     const ratio = (tsMs - state.stats.startMs) / state.stats.durationMs
     left = Math.max(4, Math.round(ratio * trackW))
+    const next = agentEvents.find(e => e._idx > ev._idx && e.ts)
+    if (next) {
+      const nMs = new Date(next.ts).getTime()
+      const wRatio = Math.max(0, (nMs - tsMs) / state.stats.durationMs)
+      width = Math.max(16, Math.min(140, Math.round(wRatio * trackW * 0.92)))
+    }
   }
   block.style.left = left + 'px'
-  block.style.width = Math.max(8, Math.min(60, (trackW / Math.max(state.events.length, 1)) * 0.8)) + 'px'
+  block.style.width = width + 'px'
 
-  // Label
   const lbl = document.createElement('span')
   lbl.className = 'event-block-label'
   lbl.textContent = ev.type === 'phase_start' || ev.type === 'phase_end'
@@ -340,7 +506,13 @@ function createEventBlock(ev, trackW) {
     : ev.type
   block.appendChild(lbl)
 
-  // Tooltip
+  if (ev.message) {
+    const msg = document.createElement('span')
+    msg.className = 'event-block-msg'
+    msg.textContent = String(ev.message).slice(0, 48)
+    block.appendChild(msg)
+  }
+
   block.title = `[${ev.type}] ${ev.message || ''}`
 
   block.addEventListener('click', (e) => {
