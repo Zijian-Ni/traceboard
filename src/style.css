@@ -687,3 +687,24 @@ html[data-bg="ember"] body {
   .event-block.is-current { animation: none; }
   #hero::before, #hero::after { animation: none; }
 }
+
+
+/* orchestra-grade v0.3.2 */
+:root {
+  --bg-base: #070c1a;
+  --bg-surface: #0d1628;
+  --bg-surface2: #101c34;
+  --teal: #00d4aa;
+  --violet: #7c4dff;
+  --text-primary: #e8f4ff;
+  --text-secondary: #8ba8cc;
+  --text-dim: #4a6080;
+  --border: rgba(0,212,170,.14);
+}
+#app-header { backdrop-filter: blur(16px) saturate(1.2); background: #070c1acc; border-bottom: 1px solid rgba(0,212,170,.12); }
+.btn-primary { background: linear-gradient(135deg, #00d4aa, #00b8d9 50%, #7c4dff); box-shadow: 0 0 28px rgba(0,212,170,.35); }
+.lane { border-color: rgba(0,212,170,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 36px #0005; }
+#playback-bar { background: linear-gradient(180deg, #0d1628f2, #0a1224f2); border-bottom-color: rgba(0,212,170,.12); }
+.scrub-fill { background: linear-gradient(90deg, #00d4aa, #7c4dff); }
+.playhead { background: linear-gradient(180deg, #fff, #00d4aa); box-shadow: 0 0 18px #00d4aacc, 0 0 40px #7c4dff66; }
+.aurora-title .glow { background: linear-gradient(90deg, #00d4aa, #7c4dff, #e040fb); -webkit-background-clip: text; background-clip: text; }
