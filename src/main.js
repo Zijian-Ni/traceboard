@@ -640,7 +640,7 @@ function exportSnapshot() {
     <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.type}</td>
     <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.agent}</td>
     <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.phase || ''}</td>
-    <td style="border:1px solid #1e3a5f;padding:5px 8px">${(ev.message || '').replace(/&/g,'&').replace(/</g,'<')}</td>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${String(ev.message||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
   </tr>`).join('')}
   </table>`
   const blob = new Blob([html], { type: 'text/html' })
