@@ -197,8 +197,10 @@ function loadTraceText(text, filename, summary = null) {
   showViewer()
   renderAll()
   showToast(t('toast_loaded') + ` (${events.length} ${t('events')})`)
-  // auto-start subtle playback after short delay
-  setTimeout(() => { if (!state.playback.playing) startPlayback() }, 600)
+  // gentle autoplay for short demos only
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches && state.events.length <= 40) {
+    setTimeout(() => { if (!state.playback.playing) startPlayback() }, 500)
+  }
 }
 
 function showViewer() {
@@ -638,7 +640,7 @@ function exportSnapshot() {
     <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.type}</td>
     <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.agent}</td>
     <td style="border:1px solid #1e3a5f;padding:5px 8px">${ev.phase || ''}</td>
-    <td style="border:1px solid #1e3a5f;padding:5px 8px">${(ev.message || '').replace(/</g, '<')}</td>
+    <td style="border:1px solid #1e3a5f;padding:5px 8px">${(ev.message || '').replace(/&/g,'&').replace(/</g,'<')}</td>
   </tr>`).join('')}
   </table>`
   const blob = new Blob([html], { type: 'text/html' })
