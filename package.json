@@ -1,13 +1,16 @@
 {
   "name": "traceboard",
   "version": "0.3.2",
-  "description": "Shareable multi-agent orchestration trace player \u2014 static site, zero backend",
+  "description": "Shareable multi-agent orchestration trace player — static site, zero backend",
   "private": false,
+  "type": "module",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js",
+    "test:worker": "node test/worker-perf.mjs"
   },
   "devDependencies": {
     "vite": "^5.4.0"
@@ -27,5 +30,8 @@
   "homepage": "https://zijian-ni.github.io/traceboard",
   "allowScripts": {
     "esbuild@0.21.5": true
+  },
+  "dependencies": {
+    "lz-string": "^1.5.0"
   }
 }
