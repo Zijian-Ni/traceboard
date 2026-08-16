@@ -1,0 +1,11 @@
+{"parentUuid":null,"uuid":"a1","sessionId":"s-1","type":"user","timestamp":"2026-08-16T09:00:00.000Z","message":{"role":"user","content":"Fix the failing benchmark and explain what broke."}}
+{"parentUuid":"a1","uuid":"a2","sessionId":"s-1","type":"assistant","timestamp":"2026-08-16T09:00:02.400Z","message":{"role":"assistant","model":"claude-opus-4-7","usage":{"input_tokens":1820,"output_tokens":96},"content":[{"type":"thinking","thinking":"internal reasoning that must never surface"},{"type":"text","text":"Let me look at the benchmark runner first."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"node run-benchmark.js --agent coder"}}]}}
+{"parentUuid":"a2","uuid":"a3","sessionId":"s-1","type":"user","timestamp":"2026-08-16T09:00:41.100Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"Error: timeout after 30000ms"}]}]}}
+{"parentUuid":"a3","uuid":"a4","sessionId":"s-1","type":"assistant","timestamp":"2026-08-16T09:00:45.000Z","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"/home/xiaoni/projects/demo/config.json","old_string":"30000","new_string":"120000"}}]}}
+{"parentUuid":"a4","uuid":"a5","sessionId":"s-1","type":"user","timestamp":"2026-08-16T09:00:46.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"Applied 1 edit"}]}}
+{"parentUuid":"a5","uuid":"a6","sessionId":"s-1","isSidechain":true,"type":"assistant","timestamp":"2026-08-16T09:00:50.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t3","name":"Grep","input":{"pattern":"coder_timeout"}}]}}
+{"type":"system","uuid":"a7","timestamp":"2026-08-16T09:00:55.000Z","content":"Compacting conversation history"}
+{"type":"summary","uuid":"a8","timestamp":"2026-08-16T09:00:56.000Z","summary":"Fixed benchmark timeout by raising coder_timeout to 120000"}
+{"type":"progress","uuid":"a9","timestamp":"2026-08-16T09:00:57.000Z","data":{"ignored":"unknown top-level type must not break parsing"}}
+{ this line is not valid json at all
+{"type":"result","uuid":"a10","timestamp":"2026-08-16T09:01:00.000Z","subtype":"success","is_error":false,"duration_ms":60000,"result":"Benchmark passes with the raised timeout."}

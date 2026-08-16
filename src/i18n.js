@@ -30,7 +30,38 @@ export const strings = {
     agents: 'agents',
     duration: 'duration',
     share_title: 'Share this trace',
-    share_note: 'URL encodes up to 50 events as base64',
+    share_note: 'Compressed share link. Redaction is ON by default.',
+    share_url_too_long: 'URL exceeds 8 000 chars even after compression.',
+    share_export_snapshot: 'Export HTML snapshot',
+    share_filtered_only: 'Share only filtered events',
+    redact_label: 'Redact secrets & paths',
+    redact_warning: '⚠️ Secrets detected — turn redaction ON before sharing',
+    redacted_count: 'Redacted {n} item(s)',
+    format_aurora: 'Aurora',
+    format_claude_code: 'Claude Code',
+    format_otel: 'OTel GenAI',
+    format_unknown: 'Unknown',
+    warnings_bar: 'Parse warnings',
+    unknown_format_msg: 'Format not recognised — showing best-effort parse. See supported-formats docs.',
+    library_title: 'Trace Library',
+    library_empty: 'No saved traces yet. Drop a file to load and save it here.',
+    library_pin: 'Pin',
+    library_unpin: 'Unpin',
+    library_delete: 'Delete',
+    library_clear: 'Clear all (local only)',
+    library_privacy: 'Your trace library is stored in your browser only. Nothing leaves your machine.',
+    install_pwa: 'Install app',
+    progress_parsing: 'Parsing… {n} events',
+    palette_placeholder: 'Type a command…',
+    cmd_jump_event: 'Jump to event…',
+    cmd_filter_agent: 'Filter by agent…',
+    cmd_export: 'Export snapshot',
+    cmd_share: 'Share trace',
+    cmd_toggle_redact: 'Toggle redaction',
+    cmd_load_demo: 'Load demo trace',
+    cmd_theme: 'Toggle theme',
+    cmd_library: 'Open trace library',
+    cmd_clear_filters: 'Clear all filters',
   },
   zh: {
     tagline: '代理轨迹播放器',
@@ -61,7 +92,38 @@ export const strings = {
     agents: '个代理',
     duration: '总耗时',
     share_title: '分享此轨迹',
-    share_note: '最多编码 50 条事件为 base64 URL',
+    share_note: '压缩分享链接，默认开启脱敏。',
+    share_url_too_long: 'URL 超过 8 000 字符（即使压缩后）。',
+    share_export_snapshot: '导出 HTML 快照',
+    share_filtered_only: '仅分享已过滤的事件',
+    redact_label: '脱敏密钥和路径',
+    redact_warning: '⚠️ 检测到密钥 — 分享前请开启脱敏',
+    redacted_count: '已脱敏 {n} 项',
+    format_aurora: 'Aurora',
+    format_claude_code: 'Claude Code',
+    format_otel: 'OTel GenAI',
+    format_unknown: '未知格式',
+    warnings_bar: '解析警告',
+    unknown_format_msg: '格式未识别 — 以尽力模式解析。请参阅支持格式文档。',
+    library_title: '轨迹库',
+    library_empty: '暂无保存的轨迹。拖入文件即可加载并保存。',
+    library_pin: '置顶',
+    library_unpin: '取消置顶',
+    library_delete: '删除',
+    library_clear: '清空全部（仅本地）',
+    library_privacy: '轨迹库存储于您的浏览器，数据不会离开本机。',
+    install_pwa: '安装应用',
+    progress_parsing: '解析中… {n} 条事件',
+    palette_placeholder: '输入命令…',
+    cmd_jump_event: '跳转到事件…',
+    cmd_filter_agent: '按代理筛选…',
+    cmd_export: '导出快照',
+    cmd_share: '分享轨迹',
+    cmd_toggle_redact: '切换脱敏',
+    cmd_load_demo: '加载演示轨迹',
+    cmd_theme: '切换主题',
+    cmd_library: '打开轨迹库',
+    cmd_clear_filters: '清除所有筛选',
   }
 }
 
@@ -78,6 +140,10 @@ export function setLang(lang) {
   })
 }
 
-export function t(key) {
-  return strings[currentLang][key] || strings['en'][key] || key
+export function t(key, vars = {}) {
+  let str = strings[currentLang][key] || strings['en'][key] || key
+  for (const [k, v] of Object.entries(vars)) {
+    str = str.replace(`{${k}}`, String(v))
+  }
+  return str
 }
