@@ -943,3 +943,50 @@ html[data-bg="ember"] body {
 .toast--ok    { border-color: var(--status-ok, #34d399); }
 .toast--warn  { border-color: var(--status-warn, #fbbf24); }
 .toast--error { border-color: var(--status-danger, #f87171); }
+
+/* ── TB-A2: canvas swimlanes (large traces) ───────────────────────────────
+   The canvas renderer takes over above CANVAS_THRESHOLD events. It reuses the
+   same design tokens as the DOM lanes so the two modes look like one product;
+   the canvas itself is aria-hidden and the wrapper carries the a11y contract. */
+#canvas-stage { position: relative; }
+
+.tb-canvas-wrap {
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--bg-2), var(--bg));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 30px #0004;
+  overflow: hidden;
+  touch-action: none;
+}
+.tb-canvas { display: block; width: 100%; cursor: grab; }
+.tb-canvas-wrap:active .tb-canvas { cursor: grabbing; }
+
+/* The ONE ring rule still holds: in canvas mode this single element is the
+   selected-event ring, and no .event-block rings exist because there is no DOM
+   event block to carry one. */
+.tb-canvas-ring {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 10px;
+}
+
+.tb-canvas-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  max-width: 320px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-solid, #0c1228);
+  color: var(--ink-1, #e8f0ff);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 12px 32px #0007;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-canvas-ring { transition: none; }
+}

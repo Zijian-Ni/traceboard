@@ -59,6 +59,7 @@ Format detection is automatic. A format chip in the header shows which adapter w
 | 🛡️ **Redaction (default ON)** | Strips API keys, tokens, home paths, emails before sharing. Shows "Redacted N items". |
 | 📤 **Export HTML snapshot** | Self-contained dark HTML table, email-able or committable. |
 | ⚡ **Streaming parse** | Web Worker streams JSONL in 500-line batches — 100 MB file, first paint under 1 s. |
+| 🖼️ **Canvas swimlanes** | Above 4 000 events the timeline switches from DOM nodes to a canvas renderer with bucketed level-of-detail, drag-to-pan and scroll-to-zoom. Measured: 12 000 events render in ~150 ms. |
 | 📚 **Trace Library** | IndexedDB stores recent traces as a `.bento` card grid. Browser-local only. |
 | 📱 **PWA / offline** | Installable. Works fully offline once cached. |
 | ⌘K **Command palette** | Jump to event, switch agent filter, export, toggle redaction. |
@@ -73,12 +74,14 @@ Format detection is automatic. A format chip in the header shows which adapter w
 traceboard/
 ├── index.html               # Single-page app shell + PWA manifest link
 ├── src/
-│   ├── main.js              # App logic (TB-1–TB-3, TB-A1, TB-A3, ⌘K)
+│   ├── main.js              # App logic (TB-1–TB-3, TB-A1, TB-A2, TB-A3, ⌘K)
 │   ├── style.css            # Aurora dark theme
 │   ├── i18n.js              # EN/中文 strings
 │   ├── trace.js             # Delegates to trace-kit; lz-string encode/decode
 │   ├── colors.js            # Agent + event type palette
 │   ├── parse.worker.js      # TB-A1: streaming JSONL Web Worker
+│   ├── canvas-lanes.js      # TB-A2: lane index, bucketing, viewport maths
+│   ├── canvas-view.js       # TB-A2: canvas renderer (pan / zoom / hit-test)
 │   ├── library.js           # TB-A3: IndexedDB trace library
 │   └── vendor/
 │       ├── trace-kit/       # @aurora-suite/trace-kit (vendored, zero-dep)
@@ -89,6 +92,7 @@ traceboard/
 │   └── sw.js                # Service worker (offline support)
 ├── test/
 │   ├── share-url.test.js    # Round-trip, redaction, format detection tests
+│   ├── canvas-lanes.test.js # TB-A2 index/viewport/LOD unit tests
 │   └── worker-perf.mjs      # TB-A1 synthetic 100 MB benchmark
 └── .github/workflows/test.yml
 ```

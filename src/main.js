@@ -15,6 +15,8 @@ import { CommandPalette, initAuroraUI, toast as auroraToast } from './vendor/aur
 import {
   saveTrace, listTraces, loadTrace, pinTrace, deleteTrace, clearLibrary, libraryStats,
 } from './library.js'
+import { selectRenderer, CANVAS_THRESHOLD } from './canvas-lanes.js'
+import { createCanvasView } from './canvas-view.js'
 
 // ─── global state ─────────────────────────────────────────────────────────
 let state = {
@@ -626,6 +628,12 @@ function stepPlayback(delta) {
 
 function applyPlaybackHighlight(open = false) {
   const ev = state.filtered[state.playback.idx]
+  if (useCanvas()) {
+    syncCanvasPlayback(open)
+    if (open && ev) openDrawer(ev)
+    updateScrubFill()
+    return
+  }
   const head = $('playhead')
   if (head && ev && state.stats?.durationMs && ev.ts) {
     const ratio = (new Date(ev.ts).getTime() - state.stats.startMs) / state.stats.durationMs
@@ -659,6 +667,63 @@ function applyPlaybackHighlight(open = false) {
 }
 
 // ─── Swimlane rendering ────────────────────────────────────────────────────
+// Two renderers, one behaviour. The DOM renderer stays the default because it
+// is accessible and easy to style; above CANVAS_THRESHOLD events the DOM cost
+// (one node per event, plus an SVG link path per lane) stops being viable, so
+// we hand the same trace to a canvas renderer that draws buckets instead.
+let canvasView = null
+
+function canvasHost() {
+  let host = $('canvas-stage')
+  if (!host) {
+    host = document.createElement('div')
+    host.id = 'canvas-stage'
+    $('swimlane-container').appendChild(host)
+  }
+  return host
+}
+
+function teardownCanvas() {
+  canvasView?.destroy()
+  canvasView = null
+  $('canvas-stage')?.remove()
+}
+
+function useCanvas() {
+  return !!canvasView
+}
+
+/** Keep whichever renderer is live in sync with the playhead / selection. */
+function syncCanvasPlayback(open) {
+  if (!canvasView) return
+  canvasView.setPlayback(state.playback.idx, { selected: open })
+}
+
+function renderCanvasLanes(events) {
+  $('lanes').innerHTML = ''
+  $('time-ruler').innerHTML = ''
+  if (!canvasView) {
+    canvasView = createCanvasView({
+      container: canvasHost(),
+      // The view reports (event, filteredIdx) -- take the index from the
+      // second argument, never by searching for the event again.
+      onSelect: (ev, filteredIdx) => {
+        if (!ev) return
+        stopPlayback()
+        state.playback.idx = filteredIdx
+        canvasView.setSelected(filteredIdx)
+        openDrawer(ev)
+        ensurePlaybackBar()
+      },
+    })
+  }
+  // The aria-label is built from the active language, so refresh it on every
+  // render -- switching EN/中 must not leave the old language behind.
+  canvasView.el.setAttribute('aria-label', t('canvas_aria'))
+  canvasView.setTrace(events, state.stats)
+  canvasView.setPlayback(state.playback.idx)
+}
+
 function renderLanes() {
   const $lanes = $('lanes')
   const $ruler = $('time-ruler')
@@ -666,9 +731,15 @@ function renderLanes() {
   $ruler.innerHTML = ''
   const events = state.filtered
   if (!events.length) {
+    teardownCanvas()
     $lanes.innerHTML = `<p class="scroll-hint">${t('no_trace')}</p>`
     return
   }
+  if (selectRenderer(events.length) === 'canvas') {
+    renderCanvasLanes(events)
+    return
+  }
+  teardownCanvas()
   const groupMap = groupByAgent(events)
   const agents = [...groupMap.keys()]
   const containerW = $lanes.parentElement.clientWidth - 130 - 40
@@ -1171,7 +1242,13 @@ function setupCommandPalette() {
 // ─── Buttons ───────────────────────────────────────────────────────────────
 function setupButtons() {
   $('btn-demo').onclick = loadDemo
-  $('btn-lang').onclick = () => { setLang(currentLang === 'en' ? 'zh' : 'en'); if (state.stats) updateToolbar() }
+  $('btn-lang').onclick = () => {
+    setLang(currentLang === 'en' ? 'zh' : 'en')
+    if (state.stats) updateToolbar()
+    // In canvas mode the wrapper's aria-label is the only translated string on
+    // the timeline, and nothing else re-renders it on a language switch.
+    canvasView?.el.setAttribute('aria-label', t('canvas_aria'))
+  }
   $('btn-share').onclick = shareTrace
   $('btn-export').onclick = exportSnapshot
   $('btn-back').onclick = showHero

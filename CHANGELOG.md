@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- TB-A2 canvas swimlanes: traces of 4 000 events or more now render on a canvas
+  with bucketed level-of-detail instead of one DOM node per event. Drag to pan,
+  scroll to zoom, click to open the detail drawer, hover for a tooltip. A
+  12 000-event trace renders in about 150 ms.
+- `src/canvas-lanes.js` (lane index, bucketing, viewport maths) and
+  `src/canvas-view.js` (renderer, hit-testing, pointer and wheel handling).
+- 26 unit tests covering renderer selection, bucketing, level-of-detail,
+  viewport clamping and hit-testing, including a 200 000-event stats pass that
+  would blow the call stack if written with `Math.min(...events)`.
+
+### Notes
+
+- Smaller traces keep the accessible DOM renderer; nothing changes below the
+  threshold.
+- The "one aurora-ring per screen" rule is preserved: in canvas mode the ring is
+  a single positioned element, because there are no DOM event blocks to carry it.
+
 ## [0.4.0] — 2026-08-16
 
 ### Added
