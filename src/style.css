@@ -23,7 +23,10 @@
 
   --text-primary:   #e2e8f0;
   --text-secondary: #94a3b8;
-  --text-dim:       #4a6080;
+  /* #4a6080 scored 2.81:1 on the toolbar's 11px stats line -- below the 4.5:1
+     WCAG AA floor for normal text. #6b83a3 measures 4.65:1 on the same
+     background while staying visibly secondary. */
+  --text-dim:       #6b83a3;
 
   --aurora-glow: 0 0 40px #00e5c740, 0 0 80px #a855f720;
   --card-shadow: 0 4px 24px #0006;
@@ -214,7 +217,7 @@ body {
   transition: all .15s;
   white-space: nowrap;
 }
-.chip.active { font-weight: 600; color: #fff; }
+.chip.active { font-weight: 600; /* colour is set inline per chip for contrast */ }
 .chip:hover { filter: brightness(1.2); }
 
 /* ── Summary bar ───────────────────────────────────────── */
@@ -698,7 +701,7 @@ html[data-bg="ember"] body {
   --violet: #7c4dff;
   --text-primary: #e8f4ff;
   --text-secondary: #8ba8cc;
-  --text-dim: #4a6080;
+  --text-dim: #6b83a3;
   --border: rgba(0,212,170,.14);
 }
 #app-header { backdrop-filter: blur(16px) saturate(1.2); background: #070c1acc; border-bottom: 1px solid rgba(0,212,170,.12); }
@@ -988,5 +991,9 @@ html[data-bg="ember"] body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tb-canvas-ring { transition: none; }
+  /* aurora-ui already resets every animation/transition globally; this keeps
+     the canvas ring explicit so a future edit here cannot reintroduce motion.
+     Verified: with prefers-reduced-motion: reduce, nothing on the canvas view
+     animates for longer than that reset. */
+  .tb-canvas-ring { transition: none; animation: none; }
 }

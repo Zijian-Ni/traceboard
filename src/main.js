@@ -4,7 +4,7 @@
  * IndexedDB library, aurora-ui design system, command palette, PWA.
  */
 import { setLang, t, currentLang } from './i18n.js'
-import { getAgentColor, getTypeColor, getAllTypeKeys, getAllAgentKeys } from './colors.js'
+import { getAgentColor, getTypeColor, getAllTypeKeys, getAllAgentKeys, readableTextOn } from './colors.js'
 import {
   parseTrace, computeStats, redactTrace, hasSecrets,
   formatDuration, formatTimestamp, groupByAgent,
@@ -501,7 +501,8 @@ function renderTypeFilters() {
     chip.className = 'chip' + (state.activeTypes.has(type) ? '' : ' active')
     chip.textContent = type
     chip.style.borderColor = col.border
-    chip.style.color = '#fff'
+    // White is not readable on the brighter palette entries; pick per colour.
+    chip.style.color = readableTextOn(col.bg)
     chip.style.background = col.bg
     chip.onclick = () => toggleTypeFilter(type)
     $typeFilters.appendChild(chip)
@@ -562,7 +563,9 @@ function ensurePlaybackBar() {
     </label>
     <div class="scrub-wrap">
       <div class="scrub-fill" id="scrub-fill"></div>
-      <input id="play-scrub" type="range" min="0" max="${max}" value="${state.playback.idx}" />
+      <input id="play-scrub" type="range" min="0" max="${max}" value="${state.playback.idx}"
+             aria-label="${escapeHtml(t('scrub_aria'))}"
+             aria-valuetext="${escapeHtml(scrubValueText())}" />
     </div>
     <span id="play-pos">${state.filtered.length ? state.playback.idx + 1 : 0}/${state.filtered.length}</span>
   `
@@ -581,11 +584,28 @@ function ensurePlaybackBar() {
   updateScrubFill()
 }
 
+/**
+ * What a screen reader should announce for the scrubber.
+ * The raw index ("4213") is useless on its own, so announce the position and
+ * the event under the playhead instead.
+ */
+function scrubValueText() {
+  const total = state.filtered.length
+  if (!total) return t('scrub_empty')
+  const ev = state.filtered[state.playback.idx]
+  const pos = `${state.playback.idx + 1} / ${total}`
+  if (!ev) return pos
+  return `${pos} — ${ev.agent || '?'}: ${ev.type || 'event'}`
+}
+
 function updateScrubFill() {
   const max = Math.max(state.filtered.length - 1, 1)
   const pct = (state.playback.idx / max) * 100
   const fill = $('scrub-fill')
   if (fill) fill.style.width = pct + '%'
+  // Keep the announced value in step with the handle as it moves.
+  const scrub = $('play-scrub')
+  if (scrub) scrub.setAttribute('aria-valuetext', scrubValueText())
 }
 
 function togglePlayback() {
@@ -918,7 +938,9 @@ function openDrawer(ev) {
   badge.textContent = ev.type
   badge.style.background = col.bg
   badge.style.borderColor = col.border
-  badge.style.color = col.border
+  // The border colour is the saturated version of the background, so using it
+  // as text put teal on teal at 2:1. Pick for contrast instead.
+  badge.style.color = readableTextOn(col.bg)
   $('drawer-agent').textContent = ev.agent || '—'
   $('drawer-phase').textContent = ev.phase || '—'
   $('drawer-time').textContent = formatTimestamp(ev.ts)

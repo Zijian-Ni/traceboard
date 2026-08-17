@@ -31,6 +31,11 @@
     </div>
   </header>
 
+  <!-- One main landmark wraps both states: the hero and the loaded trace swap
+       visibility, so neither can own <main> on its own without the page losing
+       its main landmark half the time. -->
+  <main id="app-main">
+
   <!-- Hero drop zone (shown when no trace loaded) -->
   <section id="hero" class="visible">
     <div class="hero-inner">
@@ -40,10 +45,13 @@
       </h1>
       <p class="hero-sub" data-i18n="hero_sub">Drop a JSONL trace file, or load the live demo below.</p>
 
-      <div id="drop-zone" role="button" tabindex="0" aria-label="Drop JSONL trace file here">
-        <div class="drop-icon">📂</div>
-        <p class="drop-label" data-i18n="drop_label">Drop trace.jsonl here</p>
-        <p class="drop-hint" data-i18n="drop_hint">or click to browse</p>
+      <!-- The accessible name points at the visible label rather than repeating
+           it in an aria-label: a hardcoded English label would drift from the
+           translated text and read differently than it looks. -->
+      <div id="drop-zone" role="button" tabindex="0" aria-labelledby="drop-zone-label drop-zone-hint">
+        <div class="drop-icon" aria-hidden="true">📂</div>
+        <p class="drop-label" id="drop-zone-label" data-i18n="drop_label">Drop trace.jsonl here</p>
+        <p class="drop-hint" id="drop-zone-hint" data-i18n="drop_hint">or click to browse</p>
         <input type="file" id="file-input" accept=".jsonl,.json,.ndjson" hidden />
       </div>
 
@@ -58,8 +66,9 @@
     </div>
   </section>
 
-  <!-- Main trace viewer (hidden until trace loaded) -->
-  <main id="trace-viewer" class="hidden">
+  <!-- Trace viewer (hidden until trace loaded). A section, not <main>, because
+       the surrounding <main> is the single landmark for the whole app. -->
+  <section id="trace-viewer" class="hidden" aria-label="Trace viewer">
     <!-- Toolbar -->
     <div id="toolbar">
       <div class="toolbar-left">
@@ -93,6 +102,8 @@
 
     <!-- Legend -->
     <div id="legend"></div>
+  </section>
+
   </main>
 
   <!-- Detail drawer -->
