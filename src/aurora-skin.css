@@ -1,0 +1,170 @@
+/* ============================================================
+   AURORA SKIN · Theme A「示波 / Instrument」 — traceboard
+   Loaded AFTER aurora-ui + style.css. A trace player IS an
+   oscilloscope: phosphor lanes, mm-grid, sweep scanline.
+   Dark overrides are scoped so the existing light toggle
+   keeps working (light gets a "paper instrument" variant).
+   ============================================================ */
+
+/* ---------- DARK: phosphor bench ---------- */
+html:not([data-theme="light"]) {
+  --bg-base:        #05080a;
+  --bg-surface:     #0a1014;
+  --bg-surface2:    #0d151b;
+  --bg-surface3:    #122029;
+  --border:         #14332e;
+  --border-bright:  #1e5a4c;
+
+  --teal:           #5cffc9;
+  --teal-dim:       #2fd3a4;
+  --teal-muted:     #0f6a5555;
+  --violet:         #9d8cff;
+  --violet-dim:     #7a66e6;
+  --violet-muted:   #7a66e633;
+  --gold:           #ffb454;
+  --rose:           #ff6b7d;
+  --sky:            #5cd6ff;
+
+  --text-primary:   #dce8ea;
+  --text-secondary: #8fa6b2;
+  --text-dim:       #6d8795;
+
+  --aurora-glow: 0 0 34px #5cffc93a, 0 0 70px #9d8cff1e;
+  --card-shadow: 0 4px 24px #0008;
+
+  --agent-xiaoluo:  #5cffc9;
+  --agent-hermes:   #9d8cff;
+  --agent-dsh:      #ffb454;
+  --agent-default:  #5cd6ff;
+}
+
+/* ---------- LIGHT: paper instrument ---------- */
+[data-theme="light"] {
+  --teal:           #0d9478;
+  --teal-dim:       #0a7a63;
+  --violet:         #6d5ae0;
+  --aurora-glow: 0 0 24px #0d947822;
+}
+
+/* ---------- injected layers ---------- */
+html:not([data-theme="light"]) .ak-grid {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(rgba(120, 200, 220, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 200, 220, .045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 95% 80% at 50% 0%, #000 25%, transparent 100%);
+}
+[data-theme="light"] .ak-grid {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(rgba(13, 148, 120, .05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(13, 148, 120, .05) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+html:not([data-theme="light"]) .ak-scan {
+  position: fixed; left: 0; right: 0; top: -2px; height: 1px; z-index: 4; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+  box-shadow: 0 0 18px rgba(92, 255, 201, .5);
+  opacity: 0;
+  animation: akScan 8s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+[data-theme="light"] .ak-scan { display: none; }
+@keyframes akScan {
+  0%   { transform: translateY(0);     opacity: 0; }
+  6%   { opacity: .5; }
+  90%  { opacity: .5; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+/* ---------- instrument typography ---------- */
+#app-header .brand,
+.aurora-title {
+  font-family: "Space Grotesk", "Inter", "Noto Sans SC", sans-serif;
+  letter-spacing: -.015em;
+}
+#app-header .tagline,
+.hero-hint, .trace-stats, .filter-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: .05em;
+}
+html:not([data-theme="light"]) .aurora-title { color: var(--text-primary); }
+html:not([data-theme="light"]) .aurora-title .glow {
+  color: var(--teal);
+  text-shadow: 0 0 28px rgba(92, 255, 201, .45);
+  background: none; -webkit-text-fill-color: currentColor;
+}
+
+/* ---------- header: bench toolbar ---------- */
+html:not([data-theme="light"]) #app-header {
+  background: linear-gradient(180deg, rgba(5, 8, 10, .94), rgba(5, 8, 10, .6));
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+#app-header .logo { filter: hue-rotate(-12deg) saturate(1.2); }
+
+/* ---------- drop zone: capture bay ---------- */
+html:not([data-theme="light"]) #drop-zone {
+  border-radius: 8px;
+  border: 1px dashed rgba(92, 255, 201, .3);
+  background: var(--bg-surface);
+  transition: border-color .25s, background .25s, box-shadow .25s;
+}
+html:not([data-theme="light"]) #drop-zone:hover,
+html:not([data-theme="light"]) #drop-zone:focus-visible,
+html:not([data-theme="light"]) #drop-zone.dragover {
+  border-color: var(--teal);
+  background: var(--bg-surface2);
+  box-shadow: inset 0 0 40px rgba(92, 255, 201, .06), 0 0 0 3px rgba(92, 255, 201, .1);
+}
+.drop-label { font-family: "Space Grotesk", sans-serif; }
+.drop-hint  { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: .08em; }
+
+/* ---------- buttons ---------- */
+html:not([data-theme="light"]) .btn-primary {
+  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace; letter-spacing: .04em;
+  background: var(--teal); color: #04110c; border: none;
+  box-shadow: 0 0 0 1px var(--teal), 0 8px 26px rgba(92, 255, 201, .22);
+}
+html:not([data-theme="light"]) .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 1px var(--teal), 0 14px 36px rgba(92, 255, 201, .4);
+}
+html:not([data-theme="light"]) .btn-ghost {
+  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+}
+html:not([data-theme="light"]) .btn-ghost:hover { color: var(--teal); border-color: rgba(92, 255, 201, .45); }
+
+/* ---------- toolbar / swimlanes: scope chrome ---------- */
+html:not([data-theme="light"]) #toolbar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+html:not([data-theme="light"]) #time-ruler {
+  font-family: "JetBrains Mono", monospace;
+  border-bottom: 1px solid var(--border);
+}
+html:not([data-theme="light"]) #swimlane-container {
+  background:
+    linear-gradient(rgba(120, 200, 220, .03) 1px, transparent 1px) 0 0 / 100% 32px,
+    var(--bg-base);
+}
+html:not([data-theme="light"]) #legend { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+
+/* ---------- detail drawer: readout panel ---------- */
+html:not([data-theme="light"]) #detail-drawer {
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-bright);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, .55);
+}
+html:not([data-theme="light"]) .field-label {
+  font-family: "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; font-size: 10px;
+}
+html:not([data-theme="light"]) .event-badge { border-radius: 3px; font-family: "JetBrains Mono", monospace; }
+
+/* ---------- motion safety ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .ak-scan { display: none !important; }
+}
